@@ -1,12 +1,19 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, status
-from backend.app.api.schemas.documents import DocumentCreateResponse
-from backend.app.api.schemas.common import ErrorResponse
-from datetime import datetime  # Для имитации ответа
+# backend/app/api/routes/documents.py
+from fastapi import APIRouter, UploadFile, File, Depends, status
+from app.api.schemas.documents import DocumentCreateResponse
+from app.api.schemas.common import ErrorResponse
+from datetime import datetime
 
-# Создаем роутер для документов
+# Сервисы и модели
+from app.services.file_validation import FileValidator
+from app.infrastructure.files.document_parser import DocumentParser
+from app.api.dependencies import get_file_validator, get_document_parser
+from app.infrastructure.database.models import DocumentModel
+from app.core.errors import FileValidationException, DocumentParsingError
+
 router = APIRouter(
     prefix="/documents",
-    tags=["Documents"]  # Группировка в Swagger/OpenAPI
+    tags=["Documents"]
 )
 
 
@@ -16,44 +23,53 @@ router = APIRouter(
     status_code=status.HTTP_201_CREATED,
     responses={
         400: {"model": ErrorResponse, "description": "Файл слишком большой или неверный формат"},
-        415: {"model": ErrorResponse, "description": "Неподдерживаемый media type"}
     }
 )
 async def upload_document(
-        file: UploadFile = File(..., description="Файл для суммаризации (doc, docx, txt, odt)"),
-        title: str | None = None
+        file: UploadFile = File(...),
+        title: str | None = None,
+        validator: FileValidator = Depends(get_file_validator),
+        parser: DocumentParser = Depends(get_document_parser)
 ):
     """
-    Принимает файл, валидирует его, парсит текст и сохраняет метаданные. 
-
-    Возвращает метаданные созданного документа. [cite: 8]
+    Принимает файл, валидирует, парсит текст и сохраняет в БД.
     """
 
-    # --- TODO: Реальная бизнес-логика ---
-    # Здесь будет вызов сервиса, который:
-    # 1. Валидирует file.filename, file.content_type и file.size (<= 15MB) 
-    #    (Пример: if file.size > 15 * 1024 * 1024: 
-    #              raise HTTPException(400, detail="File too large", code="file_too_large"))
-    #
-    # 2. Вызывает DocumentParser (из infrastructure/files/document_parser.py)
-    #    (Пример: parsed_text = await DocumentParser.parse(file.file))
-    #
-    # 3. Сохраняет DocumentModel в MongoDB (через Repository)
-    #    (Пример: new_doc = DocumentModel(filename=file.filename, ...))
-    #    (Пример: await new_doc.insert())
-    # ---
+    # 1. Валидация (выбросит исключение, если ошибка)
+    # Глобальный обработчик в main.py поймает его
+    mime_type = await validator.validate(file)
 
-    # Имитация успешного ответа (согласно схеме DocumentCreateResponse)
-    # В реальном коде данные будут взяты из сохраненной new_doc
+    # 2. Парсинг (выбросит исключение, если ошибка)
+    parsed_text = await parser.parse(file.file, mime_type)
 
-    print(f"File '{file.filename}' uploaded, size: {file.size}, title: {title}")
+    if not parsed_text:
+        # Дополнительная проверка на пустой текст
+        raise DocumentParsingError("Не удалось извлечь текст (файл пустой?)")
+
+    # 3. Создание модели
+    new_doc = DocumentModel(
+        filename=file.filename,
+        mime_type=mime_type,
+        size_bytes=file.size,
+        title=title,
+        parsed=True,
+        parsed_text=parsed_text
+        # uploaded_at установится автоматически (default_factory)
+    )
+
+    # 4. Сохранение в БД
+    await new_doc.insert()
+
+    # 5. Формирование ответа
+    # Генерируем превью
+    preview = (parsed_text[:200] + '...') if len(parsed_text) > 200 else parsed_text
 
     return DocumentCreateResponse(
-        id="64b7f0db4f1c2c3a9e2f1a9b",  # Это будет ID из Mongo
-        filename=file.filename,
-        mime_type=file.content_type,
-        size_bytes=file.size,
-        uploaded_at=datetime.utcnow(),
-        parsed=True,
-        parsed_preview="Первый абзац или первые 200 символов..."
+        id=str(new_doc.id),  # Преобразуем ObjectId в str
+        filename=new_doc.filename,
+        mime_type=new_doc.mime_type,
+        size_bytes=new_doc.size_bytes,
+        uploaded_at=new_doc.uploaded_at,
+        parsed=new_doc.parsed,
+        parsed_preview=preview
     )

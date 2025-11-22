@@ -1,0 +1,485 @@
+В файле описана единая, логичная и готовая к внедрению спецификация API (OpenAPI/ FastAPI) и полный набор Pydantic-схем + сопутствующие Mongo-модели для коллекций documents и summaries. Всё дано в виде готовых примеров запросов/ответов.
+
+---
+
+1. Быстрая навигация
+
+Раздел A — OpenAPI / эндпоинты (контракты, примеры запросов/ответов).
+
+Раздел B — Pydantic-схемы (Python код).
+
+Раздел C — Mongo-модели / structure (Beanie-предложение + эквивалент raw Mongo документ + индексы).
+
+В конце — краткие рекомендации по интеграции (куда подключать какие классы и как регистрировать маршруты).
+
+
+---
+
+A. Спецификация API (эндпоинты + примеры)
+
+> Все ответы ошибок стандартизированы:
+
+
+
+{
+  "detail":"Описание ошибки",
+  "code":"error_code"
+}
+
+Endpoints (основные)
+
+1. GET /health
+
+Описание: Проверка статуса сервиса.
+
+Ответ 200:
+
+{ "status": "ok", "uptime": "PT1H23M" }
+
+
+
+2. POST /documents/ — загрузка файла
+
+Описание: Загружает файл (multipart/form-data). Проводит валидацию (расширение, размер ≤ 15MB), парсит текст и сохраняет метаданные.
+
+Request: multipart/form-data:
+
+file — файл (doc/docx/txt/odt)
+
+optional: title — string
+
+
+Response 201 (created):
+
+{
+  "id": "64b7f0db4f1c2c3a9e2f1a9b",
+  "filename": "report.docx",
+  "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "size_bytes": 234567,
+  "uploaded_at": "2025-11-21T12:34:56Z",
+  "parsed": true,
+  "parsed_preview": "Первый абзац или первые 200 символов..."
+}
+
+Errors: 400 (unsupported_format / file_too_large), 415 (unsupported_media_type).
+
+
+
+3. GET /documents/{document_id} — получить документ
+
+Описание: Возвращает метаданные документа и (опционально) полный parsed_text если запросил.
+
+Query param: include_text=true|false (по умолчанию false).
+
+Response 200:
+
+{
+  "id":"64b7f0db4f1c2c3a9e2f1a9b",
+  "filename":"report.docx",
+  "mime_type":"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "size_bytes":234567,
+  "uploaded_at":"2025-11-21T12:34:56Z",
+  "parsed":true,
+  "parsed_text":"Полный извлечённый текст документа...",
+  "storage_ref": null
+}
+
+
+
+4. GET /documents/ — список документов (пагинация)
+
+Query params: limit (default 20), offset (default 0).
+
+Response 200:
+
+{
+  "total": 123,
+  "limit": 20,
+  "offset": 0,
+  "items": [
+    { "id": "...", "filename": "a.docx", "uploaded_at": "...", "size_bytes": 1123, "parsed": true },
+    ...
+  ]
+}
+
+
+
+5. POST /summaries/ — создать суммаризацию
+
+Описание: Создаёт суммаризацию по document_id (рекомендуемый вариант) или по text (raw). Опции max_length, min_length, method(=mbart_ru_sum_gazeta).
+
+Request JSON (example):
+
+{
+  "document_id": "64b7f0db4f1c2c3a9e2f1a9b",
+  "max_length": 256,
+  "min_length": 32
+}
+
+Response 201 (sync) (возвращает созданный summary):
+
+{
+  "id": "64b7f2aa4f1c2c3a9e2f1b00",
+  "document_id": "64b7f0db4f1c2c3a9e2f1a9b",
+  "method": "mbart_ru_sum_gazeta",
+  "params": { "max_length": 256, "min_length": 32 },
+  "summary_text": "Краткое содержание...",
+  "created_at": "2025-11-21T12:37:30Z",
+  "status": "done"
+}
+
+Alternative (async queue): Response 202:
+
+{ "task_id": "task-123", "status": "queued", "summary_id": null }
+
+Errors: 404 document_not_found, 400 invalid_params, 500 summarization_error.
+
+
+
+6. GET /summaries/{summary_id} — получить суммаризацию
+
+Response 200:
+
+{
+  "id": "64b7f2aa4f1c2c3a9e2f1b00",
+  "document_id": "64b7f0db4f1c2c3a9e2f1a9b",
+  "method": "mbart_ru_sum_gazeta",
+  "params": { "max_length": 256, "min_length": 32 },
+  "summary_text": "Краткое содержание...",
+  "created_at": "2025-11-21T12:37:30Z",
+  "status": "done"
+}
+
+
+
+7. GET /documents/{document_id}/summaries — список суммаризаций для документа
+
+Response 200:
+
+{
+  "total": 2,
+  "items": [
+    { "id":"...", "method":"mbart_ru_sum_gazeta", "created_at":"...", "status":"done", "summary_preview":"..." }
+  ]
+}
+
+
+
+
+
+---
+
+B. Pydantic-схемы (Python) — готовые классы
+
+Ниже — Python-код Pydantic-схем, их можно поместить в api/schemas/documents.py и api/schemas/summaries.py.
+
+# app/api/schemas/common.py
+from datetime import datetime
+from typing import Optional, Dict, Any
+from pydantic import BaseModel, Field
+
+class HealthResponse(BaseModel):
+    status: str
+    uptime: Optional[str]
+
+class ErrorResponse(BaseModel):
+    detail: str
+    code: str
+
+# Helper: string id (Mongo ObjectId as hex)
+class IDModel(BaseModel):
+    id: str = Field(..., example="64b7f0db4f1c2c3a9e2f1a9b")
+
+# app/api/schemas/documents.py
+from datetime import datetime
+from pydantic import BaseModel, Field
+from typing import Optional
+
+class DocumentCreateResponse(BaseModel):
+    id: str = Field(..., example="64b7f0db4f1c2c3a9e2f1a9b")
+    filename: str
+    mime_type: str
+    size_bytes: int
+    uploaded_at: datetime
+    parsed: bool
+    parsed_preview: Optional[str] = Field(None, description="Первые ~200 символов parsed_text")
+
+class DocumentListItem(BaseModel):
+    id: str
+    filename: str
+    size_bytes: int
+    uploaded_at: datetime
+    parsed: bool
+
+class DocumentListResponse(BaseModel):
+    total: int
+    limit: int
+    offset: int
+    items: list[DocumentListItem]
+
+class DocumentDetailResponse(BaseModel):
+    id: str
+    filename: str
+    mime_type: str
+    size_bytes: int
+    uploaded_at: datetime
+    parsed: bool
+    parsed_text: Optional[str] = None
+    storage_ref: Optional[str] = None
+
+# app/api/schemas/summaries.py
+from datetime import datetime
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any
+
+class SummaryCreateRequest(BaseModel):
+    document_id: Optional[str] = Field(None, example="64b7f0db4f1c2c3a9e2f1a9b")
+    text: Optional[str] = Field(None, description="Raw text to summarize (used if document_id not provided)")
+    max_length: Optional[int] = Field(256, ge=16, le=2048)
+    min_length: Optional[int] = Field(32, ge=0, le=1024)
+    method: Optional[str] = Field("mbart_ru_sum_gazeta")
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "document_id": "64b7f0db4f1c2c3a9e2f1a9b",
+                "max_length": 256,
+                "min_length": 32,
+                "method": "mbart_ru_sum_gazeta"
+            }
+        }
+
+class SummaryResponse(BaseModel):
+    id: str
+    document_id: Optional[str]
+    method: str
+    params: Dict[str, Any]
+    summary_text: Optional[str]
+    created_at: datetime
+    status: str = Field(..., example="done")  # queued|running|done|failed
+
+Дополнительно — список/пагинация суммаризаций:
+
+# app/api/schemas/summaries_list.py
+from pydantic import BaseModel
+from typing import List
+
+class SummaryListItem(BaseModel):
+    id: str
+    method: str
+    created_at: str
+    status: str
+    summary_preview: str
+
+class SummaryListResponse(BaseModel):
+    total: int
+    items: List[SummaryListItem]
+
+
+---
+
+C. Mongo-модели (структура документов + Beanie примеры)
+
+Мы приведём:
+
+Beanie-style model (рекомендуемый path if you choose Beanie/ODM) — удобна, потому что совместима с Pydantic.
+
+Эквивалент raw Mongo документ (пример JSON) + рекомендуемые индексы.
+
+
+> Примечание: если вы используете другой ODM (Odmantic / Motor / pymongo), структура полей остаётся той же; приведённые модели — адаптируемы.
+
+
+
+C.1. documents — Beanie модель (пример)
+
+# app/infrastructure/database/models.py
+from beanie import Document, Indexed
+from pydantic import Field
+from datetime import datetime
+from typing import Optional
+
+class DocumentModel(Document):
+    filename: str
+    mime_type: str
+    size_bytes: int
+    uploaded_at: datetime = Field(default_factory=datetime.utcnow)
+    parsed: bool = False
+    parsed_text: Optional[str] = None
+    storage_ref: Optional[str] = None  # если используете GridFS/S3
+    title: Optional[str] = None
+
+    class Settings:
+        name = "documents"
+        indexes = [
+            "uploaded_at",
+            [("filename", 1)]
+        ]
+
+Raw example document (Mongo):
+
+{
+  "_id": ObjectId("64b7f0db4f1c2c3a9e2f1a9b"),
+  "filename": "report.docx",
+  "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "size_bytes": 234567,
+  "uploaded_at": ISODate("2025-11-21T12:34:56Z"),
+  "parsed": true,
+  "parsed_text": "Текст документа ...",
+  "storage_ref": null,
+  "title": "Отчёт по продажам"
+}
+
+Рекомендуемые индексы (pymongo):
+
+db.documents.create_index([("uploaded_at", -1)])
+db.documents.create_index([("filename", 1)])
+
+C.2. summaries — Beanie модель (пример)
+
+from beanie import Document
+from pydantic import Field
+from datetime import datetime
+from typing import Optional, Dict, Any
+
+class SummaryModel(Document):
+    document_id: Optional[str] = None  # ObjectId as string or DBRef if you prefer
+    method: str = "mbart_ru_sum_gazeta"
+    params: Dict[str, Any] = Field(default_factory=dict)
+    summary_text: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    status: str = Field("done")  # queued|running|done|failed
+    error_message: Optional[str] = None
+
+    class Settings:
+        name = "summaries"
+        indexes = [
+            [("document_id", 1)],
+            [("created_at", -1)]
+        ]
+
+Raw example document:
+
+{
+  "_id": ObjectId("64b7f2aa4f1c2c3a9e2f1b00"),
+  "document_id": ObjectId("64b7f0db4f1c2c3a9e2f1a9b"),
+  "method": "mbart_ru_sum_gazeta",
+  "params": { "max_length": 256, "min_length": 32 },
+  "summary_text": "Краткое содержание документа ...",
+  "created_at": ISODate("2025-11-21T12:37:30Z"),
+  "status": "done",
+  "error_message": null
+}
+
+Рекомендуемые индексы (pymongo):
+
+db.summaries.create_index([("document_id", 1)])
+db.summaries.create_index([("created_at", -1)])
+
+
+---
+
+D. Примеры реализации маршрутов (FastAPI signatures)
+
+Ниже — минимальная и понятная FastAPI-подпись каждого эндпоинта, использующая Pydantic-схемы выше. (Реализация внутри handler'ов — отдельно; здесь контракт.)
+
+from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Query, BackgroundTasks
+from app.api.schemas.documents import DocumentCreateResponse, DocumentDetailResponse, DocumentListResponse
+from app.api.schemas.summaries import SummaryCreateRequest, SummaryResponse
+from app.api.schemas.common import HealthResponse, ErrorResponse
+
+app = FastAPI(title="doc-summarizer", version="0.1")
+
+@app.get("/health", response_model=HealthResponse)
+def health():
+    return {"status":"ok", "uptime":"PT0H5M"}
+
+@app.post("/documents/", response_model=DocumentCreateResponse, responses={400: {"model": ErrorResponse}})
+async def upload_document(file: UploadFile = File(...), title: str | None = None):
+    """
+    Accept file, validate, parse and save metadata.
+    """
+    # validate size & extension, parse text, save to DB... return DocumentCreateResponse
+    ...
+
+@app.get("/documents/{document_id}", response_model=DocumentDetailResponse, responses={404: {"model": ErrorResponse}})
+async def get_document(document_id: str, include_text: bool = Query(False)):
+    ...
+
+@app.get("/documents/", response_model=DocumentListResponse)
+async def list_documents(limit: int = 20, offset: int = 0):
+    ...
+
+@app.post("/summaries/", response_model=SummaryResponse, responses={404: {"model": ErrorResponse}})
+async def create_summary(body: SummaryCreateRequest):
+    ...
+
+
+---
+
+E. Примеры cURL (быстро)
+
+1. Upload:
+
+
+
+curl -v -X POST "http://localhost:8000/documents/" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@/path/to/report.docx" \
+  -F "title=Report"
+
+2. Create summary (by document_id):
+
+
+
+curl -X POST "http://localhost:8000/summaries/" \
+ -H "Content-Type: application/json" \
+ -d '{"document_id":"64b7f0db4f1c2c3a9e2f1a9b","max_length":200}'
+
+3. Get summary:
+
+
+
+curl -X GET "http://localhost:8000/summaries/64b7f2aa4f1c2c3a9e2f1b00"
+
+
+---
+
+F. Рекомендации по интеграции (коротко)
+
+Pydantic схемы разместите в app/api/schemas/ (как в нашем примере). API-роуты должны импортировать и возвращать эти модели — это автоматически даёт OpenAPI документацию в FastAPI.
+
+Mongo-модели (Beanie) поместите в app/infrastructure/database/models.py. При старте приложения инициализируйте Beanie (или другой ODM) после создания motor client. Если вы не хотите использовать ODM — используйте pymongo и те же имена полей в dict-объектах.
+
+Для document_id в SummaryModel можно хранить str (hex ObjectId) — так проще сериализовать. В Beanie можно хранить PydanticObjectId/Link.
+
+Размер parsed_text: если ожидаете длинные тексты (> 1MB), храните parsed_text в GridFS/S3 и в documents сохраняйте storage_ref (uri). UI будет запрашивать GET /documents/{id}?include_text=true для получения полного текста.
+
+Validation: проверять размер файла до сохранения (server side). На клиенте — также делать превентивную проверку.
+
+Асинхронность: для MVP допустимо синхронное суммаризирование (если inference быстрое). Для больших документов подключите background tasks / очередь (Celery/RQ) — тогда SummaryModel.status будет queued|running|done|failed.
+
+OpenAPI: FastAPI автоматически соберёт документацию по Pydantic схемам; добавьте responses блоки для ошибок.
+
+
+---
+
+G. Итог — что получено
+
+Полный контракт API с примерами запросов/ответов.
+
+Готовые Pydantic-схемы: DocumentCreateResponse, DocumentDetailResponse, DocumentListResponse, SummaryCreateRequest, SummaryResponse, ErrorResponse.
+
+Beanie-совместимые Mongo-модели DocumentModel и SummaryModel (и эквивалент JSON-формат документов для прямого использования с pymongo).
+
+Рекомендации по индексам, хранению больших текстов и интеграции очереди задач.
+
+---
+
+Возможные дальнейшие пути:
+
+- Создание файла app/api/schemas/*.py с указанным кодом (готовые .py файлы),
+
+- Создание main.py, где регистрируются все маршруты и производится инициализация Beanie/Motor,
+
+- Генерация OpenAPI YAML/JSON по этим схемам (swagger-ready).

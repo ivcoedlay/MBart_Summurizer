@@ -1,8 +1,13 @@
-from fastapi import FastAPI
-from backend.app.api.schemas.common import HealthResponse
-from backend.app.api.routes import documents, summaries # Импорт наших роутеров
+# backend/app/main.py
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
 
-# (TODO: Позже здесь будет инициализация настроек из config.py)
+from backend.app.api.schemas.common import HealthResponse, ErrorResponse
+from backend.app.api.routes import documents, summaries
+from backend.app.config import settings  # Импорт настроек
+from backend.app.infrastructure.database.connection import init_database  # Импорт
+from backend.app.core.errors import AppBaseException  # Импорт
+from backend.app.infrastructure.summarization.mbart_gateway import SummarizationGateway
 
 app = FastAPI(
     title="AI Document Summarizer",
@@ -10,38 +15,57 @@ app = FastAPI(
     description="API для загрузки документов и их суммаризации (модель mbart_ru_sum_gazeta)"
 )
 
+
+# --- Глобальный обработчик кастомных ошибок ---
+
+@app.exception_handler(AppBaseException)
+async def app_exception_handler(request: Request, exc: AppBaseException):
+    """
+    Перехватывает наши кастомные ошибки (FileTooLargeError, etc.)
+    и возвращает стандартизированный ErrorResponse.
+    """
+    # По умолчанию код 400, но можно расширить логику,
+    # анализируя exc.code, если нужны другие статусы (404, 500)
+    status_code = status.HTTP_400_BAD_REQUEST
+    if exc.code == "document_not_found":
+        status_code = status.HTTP_404_NOT_FOUND
+    elif exc.code == "summarization_error":
+        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+
+    return JSONResponse(
+        status_code=status_code,
+        content=ErrorResponse(detail=exc.detail, code=exc.code).model_dump()
+    )
+
+
+# --- Обработчики жизненного цикла ---
+
+@app.on_event("startup")
+async def startup_event():
+    """
+    Выполняется при старте приложения.
+    Подключается к БД и загружает ML-модель.
+    """
+    # 1. Подключение к БД
+    # Разделяем DSN на URL и имя БД
+    mongo_url = settings.MONGO_DSN
+    db_name = settings.MONGO_DSN.split("/")[-1].split("?")[0]
+    await init_database(mongo_url, db_name)
+
+    # 2. Загрузка ML-модели (тяжелый объект, грузим 1 раз)
+    print("Loading summarization model...")
+    app.state.summarizer = SummarizationGateway(model_name=settings.MODEL_NAME)
+    print("Model loaded.")
+
+
 # --- Системный эндпоинт ---
 
-@app.get(
-    "/health",
-    response_model=HealthResponse,
-    tags=["Health"]
-)
+@app.get("/health", response_model=HealthResponse, tags=["Health"])
 def health_check():
-    """
-    Проверка работоспособности сервиса. [cite: 6]
-    """
-    return {"status": "ok", "uptime": "PT0M1S"} # [cite: 6]
+    return {"status": "ok", "uptime": "PT0M1S"}
 
 
 # --- Подключение API-роутеров ---
 
-# Подключаем роутер из app/api/routes/documents.py
 app.include_router(documents.router)
-
-# Подключаем роутер из app/api/routes/summaries.py
 app.include_router(summaries.router)
-
-
-# --- (TODO) Обработчики жизненного цикла ---
-
-# @app.on_event("startup")
-# async def startup_event():
-#     # Здесь будет инициализация клиента к MongoDB (Beanie / Motor)
-#     # (Пример: await init_database())
-#     pass
-
-# @app.on_event("shutdown")
-# async def shutdown_event():
-#     # Здесь будет закрытие соединений
-#     pass
