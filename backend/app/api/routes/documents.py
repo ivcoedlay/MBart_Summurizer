@@ -1,4 +1,3 @@
-# backend/app/api/routes/documents.py
 from fastapi import APIRouter, UploadFile, File, Depends, status
 from backend.app.api.schemas.documents import DocumentCreateResponse
 from backend.app.api.schemas.common import ErrorResponse
@@ -23,6 +22,7 @@ router = APIRouter(
     status_code=status.HTTP_201_CREATED,
     responses={
         400: {"model": ErrorResponse, "description": "Файл слишком большой или неверный формат"},
+        415: {"model": ErrorResponse, "description": "Неподдерживаемый media type"}
     }
 )
 async def upload_document(

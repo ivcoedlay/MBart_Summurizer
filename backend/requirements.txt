@@ -1,0 +1,19 @@
+# FastAPI
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings # Для config.py
+
+# База данных
+beanie # ODM для MongoDB
+motor # Асинхронный драйвер
+
+# Парсинг файлов
+python-magic # Для MIME-типов
+python-docx  # Для .docx
+odfpy        # Для .odt
+
+# ML / Суммаризация
+transformers # Для модели
+torch        # pytorch
+sentencepiece # Токенизатор для mbart
