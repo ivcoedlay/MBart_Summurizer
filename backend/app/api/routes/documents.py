@@ -1,15 +1,15 @@
 # backend/app/api/routes/documents.py
 from fastapi import APIRouter, UploadFile, File, Depends, status
-from app.api.schemas.documents import DocumentCreateResponse
-from app.api.schemas.common import ErrorResponse
+from backend.app.api.schemas.documents import DocumentCreateResponse
+from backend.app.api.schemas.common import ErrorResponse
 from datetime import datetime
 
 # Сервисы и модели
-from app.services.file_validation import FileValidator
-from app.infrastructure.files.document_parser import DocumentParser
-from app.api.dependencies import get_file_validator, get_document_parser
-from app.infrastructure.database.models import DocumentModel
-from app.core.errors import FileValidationException, DocumentParsingError
+from backend.app.services.file_validation import FileValidator
+from backend.app.infrastructure.files.document_parser import DocumentParser
+from backend.app.api.dependencies import get_file_validator, get_document_parser
+from backend.app.infrastructure.database.models import DocumentModel
+from backend.app.core.errors import FileValidationException, DocumentParsingError
 
 router = APIRouter(
     prefix="/documents",
