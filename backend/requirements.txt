@@ -1,19 +1,25 @@
-# FastAPI
+# Основные зависимости
 fastapi
 uvicorn[standard]
 pydantic
-pydantic-settings # Для config.py
+pydantic-settings
 
 # База данных
-beanie # ODM для MongoDB
-motor # Асинхронный драйвер
+beanie
+motor
+pymongo
 
 # Парсинг файлов
-python-magic # Для MIME-типов
-python-docx  # Для .docx
-odfpy        # Для .odt
+python-magic
+python-magic-bin
+python-docx
+odfpy
 
 # ML / Суммаризация
-transformers # Для модели
-torch        # pytorch
-sentencepiece # Токенизатор для mbart
+transformers
+torch
+sentencepiece
+accelerate
+
+# Дополнительно
+aiofiles
