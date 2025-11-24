@@ -1,8 +1,8 @@
 # backend/app/api/dependencies.py
 from fastapi import Depends, Request
-from app.services.file_validation import FileValidator
-from app.infrastructure.files.document_parser import DocumentParser
-from app.infrastructure.summarization.mbart_gateway import SummarizationGateway
+from backend.app.services.file_validation import FileValidator
+from backend.app.infrastructure.files.document_parser import DocumentParser
+from backend.app.infrastructure.summarization.mbart_gateway import SummarizationGateway
 
 # Создаем по одному экземпляру на все приложение
 # Они не хранят состояние, поэтому это безопасно

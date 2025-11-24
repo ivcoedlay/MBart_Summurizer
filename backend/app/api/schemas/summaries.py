@@ -10,7 +10,7 @@ class SummaryCreateRequest(BaseModel):
     method: Optional[str] = Field("mbart_ru_sum_gazeta")
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "document_id": "64b7f0db4f1c2c3a9e2f1a9b",
                 "max_length": 256,
