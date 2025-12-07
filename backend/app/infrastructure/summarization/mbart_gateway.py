@@ -1,9 +1,11 @@
 # backend/app/infrastructure/summarization/mbart_gateway.py
 import asyncio
+import logging
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 import torch
 from backend.app.core.errors import SummarizationError
 
+log = logging.getLogger(__name__)
 
 class SummarizationGateway:
     """
@@ -12,12 +14,16 @@ class SummarizationGateway:
 
     def __init__(self, model_name: str):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"Using device: {self.device}")
+        log.info(f"Using device: {self.device}")  # <-- Изменить print на log.info
 
         try:
+            log.info(f"Loading tokenizer '{model_name}'...")
             self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+            log.info(f"Loading model '{model_name}' to {self.device}...")
             self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name).to(self.device)
+            log.info("Model and tokenizer loaded.")
         except Exception as e:
+            log.error(f"Failed to load model '{model_name}': {e}")  # <-- Добавить лог
             raise RuntimeError(f"Failed to load model '{model_name}': {e}")
 
     def _blocking_summarize(

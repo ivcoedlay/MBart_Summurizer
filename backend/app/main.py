@@ -1,4 +1,5 @@
 # backend/app/main.py
+import logging
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
@@ -9,6 +10,9 @@ from backend.app.infrastructure.database.connection import init_database  # Им
 from backend.app.core.errors import AppBaseException  # Импорт
 from backend.app.infrastructure.summarization.mbart_gateway import SummarizationGateway
 
+# --- Настройка логирования ---
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -22,15 +26,14 @@ async def lifespan(app: FastAPI):
     db_name = settings.MONGO_DSN.split("/")[-1].split("?")[0]
     await init_database(mongo_url, db_name)
 
-    # 2. Загрузка ML-модели (тяжелый объект, грузим 1 раз)
-    print("Loading summarization model...")
+    log.info("Loading summarization model...")
     app.state.summarizer = SummarizationGateway(model_name=settings.MODEL_NAME)
-    print("Model loaded.")
+    log.info("Model loaded successfully.")
 
-    yield  # Приложение работает в этот период
+    yield
 
     # Код на этапе завершения работы приложения
-    print("Shutting down application...")
+    log.info("Shutting down application...")
     # Очистка ресурсов, если необходимо
     if hasattr(app.state, "summarizer"):
         del app.state.summarizer
