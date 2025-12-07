@@ -1,0 +1,478 @@
+{
+    "openapi": "3.1.0",
+    "info": {
+        "title": "AI Document Summarizer",
+        "description": "API для загрузки документов и их суммаризации (модель mbart_ru_sum_gazeta)",
+        "version": "0.1.0"
+    },
+    "paths": {
+        "/health": {
+            "get": {
+                "tags": [
+                    "Health"
+                ],
+                "summary": "Health Check",
+                "operationId": "health_check_health_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HealthResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/documents/": {
+            "post": {
+                "tags": [
+                    "Documents"
+                ],
+                "summary": "Upload Document",
+                "description": "Принимает файл, валидирует, парсит текст и сохраняет в БД.",
+                "operationId": "upload_document_documents__post",
+                "parameters": [
+                    {
+                        "name": "title",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Title"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/Body_upload_document_documents__post"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentCreateResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Файл слишком большой или неверный формат",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "415": {
+                        "description": "Неподдерживаемый media type",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/summaries/": {
+            "post": {
+                "tags": [
+                    "Summaries"
+                ],
+                "summary": "Create Summary",
+                "description": "Создаёт (синхронно) суммаризацию для документа.",
+                "operationId": "create_summary_summaries__post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SummaryCreateRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "201": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SummaryResponse"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Документ не найден",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Невалидные параметры запроса",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Ошибка в процессе суммаризации",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "Body_upload_document_documents__post": {
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "format": "binary",
+                        "title": "File"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "file"
+                ],
+                "title": "Body_upload_document_documents__post"
+            },
+            "DocumentCreateResponse": {
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "title": "Id",
+                        "example": "64b7f0db4f1c2c3a9e2f1a9b"
+                    },
+                    "filename": {
+                        "type": "string",
+                        "title": "Filename"
+                    },
+                    "mime_type": {
+                        "type": "string",
+                        "title": "Mime Type"
+                    },
+                    "size_bytes": {
+                        "type": "integer",
+                        "title": "Size Bytes"
+                    },
+                    "uploaded_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "title": "Uploaded At"
+                    },
+                    "parsed": {
+                        "type": "boolean",
+                        "title": "Parsed"
+                    },
+                    "parsed_preview": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Parsed Preview",
+                        "description": "Первые ~200 символов parsed_text"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "id",
+                    "filename",
+                    "mime_type",
+                    "size_bytes",
+                    "uploaded_at",
+                    "parsed"
+                ],
+                "title": "DocumentCreateResponse"
+            },
+            "ErrorResponse": {
+                "properties": {
+                    "detail": {
+                        "type": "string",
+                        "title": "Detail"
+                    },
+                    "code": {
+                        "type": "string",
+                        "title": "Code"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "detail",
+                    "code"
+                ],
+                "title": "ErrorResponse"
+            },
+            "HTTPValidationError": {
+                "properties": {
+                    "detail": {
+                        "items": {
+                            "$ref": "#/components/schemas/ValidationError"
+                        },
+                        "type": "array",
+                        "title": "Detail"
+                    }
+                },
+                "type": "object",
+                "title": "HTTPValidationError"
+            },
+            "HealthResponse": {
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "title": "Status"
+                    },
+                    "uptime": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Uptime"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "status",
+                    "uptime"
+                ],
+                "title": "HealthResponse"
+            },
+            "SummaryCreateRequest": {
+                "properties": {
+                    "document_id": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Document Id",
+                        "example": "64b7f0db4f1c2c3a9e2f1a9b"
+                    },
+                    "text": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Text",
+                        "description": "Raw text to summarize (used if document_id not provided)"
+                    },
+                    "max_length": {
+                        "anyOf": [
+                            {
+                                "type": "integer",
+                                "maximum": 2048.0,
+                                "minimum": 16.0
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Max Length",
+                        "default": 256
+                    },
+                    "min_length": {
+                        "anyOf": [
+                            {
+                                "type": "integer",
+                                "maximum": 1024.0,
+                                "minimum": 0.0
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Min Length",
+                        "default": 32
+                    },
+                    "method": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Method",
+                        "default": "mbart_ru_sum_gazeta"
+                    }
+                },
+                "type": "object",
+                "title": "SummaryCreateRequest",
+                "example": {
+                    "document_id": "64b7f0db4f1c2c3a9e2f1a9b",
+                    "max_length": 256,
+                    "method": "mbart_ru_sum_gazeta",
+                    "min_length": 32
+                }
+            },
+            "SummaryResponse": {
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "title": "Id"
+                    },
+                    "document_id": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Document Id"
+                    },
+                    "method": {
+                        "type": "string",
+                        "title": "Method"
+                    },
+                    "params": {
+                        "additionalProperties": true,
+                        "type": "object",
+                        "title": "Params"
+                    },
+                    "summary_text": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Summary Text"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "title": "Created At"
+                    },
+                    "status": {
+                        "type": "string",
+                        "title": "Status",
+                        "example": "done"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "id",
+                    "document_id",
+                    "method",
+                    "params",
+                    "summary_text",
+                    "created_at",
+                    "status"
+                ],
+                "title": "SummaryResponse"
+            },
+            "ValidationError": {
+                "properties": {
+                    "loc": {
+                        "items": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "integer"
+                                }
+                            ]
+                        },
+                        "type": "array",
+                        "title": "Location"
+                    },
+                    "msg": {
+                        "type": "string",
+                        "title": "Message"
+                    },
+                    "type": {
+                        "type": "string",
+                        "title": "Error Type"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "loc",
+                    "msg",
+                    "type"
+                ],
+                "title": "ValidationError"
+            }
+        }
+    }
+}
