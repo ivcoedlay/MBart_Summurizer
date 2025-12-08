@@ -1,14 +1,16 @@
-from fastapi import APIRouter, UploadFile, File, Depends, status
-from backend.app.api.schemas.documents import DocumentCreateResponse
+from fastapi import APIRouter, UploadFile, File, Depends, status, HTTPException
+from backend.app.api.schemas.documents import DocumentCreateResponse, DocumentListResponse, DocumentListItem, DocumentDetailResponse
 from backend.app.api.schemas.common import ErrorResponse
 from datetime import datetime
+from typing import Optional
 
 # Сервисы и модели
 from backend.app.services.file_validation import FileValidator
 from backend.app.infrastructure.files.document_parser import DocumentParser
 from backend.app.api.dependencies import get_file_validator, get_document_parser
-from backend.app.infrastructure.database.models import DocumentModel
+from backend.app.infrastructure.database.models import DocumentModel, SummaryModel
 from backend.app.core.errors import FileValidationException, DocumentParsingError
+
 
 router = APIRouter(
     prefix="/documents",
@@ -72,4 +74,65 @@ async def upload_document(
         uploaded_at=new_doc.uploaded_at,
         parsed=new_doc.parsed,
         parsed_preview=preview
+    )
+
+# 1. Роут для получения списка документов (History)
+@router.get(
+    "/",
+    response_model=DocumentListResponse,
+    tags=["Documents"]
+)
+async def list_documents(limit: int = 10, offset: int = 0):
+    """
+    Получает список всех загруженных документов с пагинацией.
+    """
+    total = await DocumentModel.count()
+    # Сортировка по дате загрузки (от новых к старым)
+    docs = await DocumentModel.find_all(
+        limit=limit,
+        skip=offset,
+        sort="-uploaded_at"
+    ).to_list()
+
+    items = [
+        DocumentListItem(
+            id=str(doc.id),
+            filename=doc.filename,
+            size_bytes=doc.size_bytes,
+            uploaded_at=doc.uploaded_at,
+            parsed=doc.parsed
+        ) for doc in docs
+    ]
+
+    return DocumentListResponse(total=total, limit=limit, offset=offset, items=items)
+
+
+# 2. Роут для получения деталей документа
+@router.get(
+    "/{document_id}",
+    response_model=DocumentDetailResponse,
+    tags=["Documents"],
+    responses={404: {"model": ErrorResponse, "description": "Документ не найден"}}
+)
+async def get_document_detail(document_id: str):
+    """
+    Получает детали документа, включая распарсенный текст.
+    """
+    doc = await DocumentModel.get(document_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Документ с ID '{document_id}' не найден."
+        )
+
+    # Приводим к схеме DocumentDetailResponse
+    return DocumentDetailResponse(
+        id=str(doc.id),
+        filename=doc.filename,
+        mime_type=doc.mime_type,
+        size_bytes=doc.size_bytes,
+        uploaded_at=doc.uploaded_at,
+        parsed=doc.parsed,
+        parsed_text=doc.parsed_text,
+        storage_ref=doc.storage_ref
     )

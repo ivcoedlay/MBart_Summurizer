@@ -3,6 +3,7 @@ import logging
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+from fastapi.middleware.cors import CORSMiddleware
 from backend.app.api.schemas.common import HealthResponse, ErrorResponse
 from backend.app.api.routes import documents, summaries
 from backend.app.config import settings  # Импорт настроек
@@ -46,6 +47,18 @@ app = FastAPI(
     lifespan=lifespan  # Используем новый обработчик жизненного цикла
 )
 
+origins = [
+    "http://localhost:3000",  # Frontend по умолчанию
+    "http://127.0.0.1:3000",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # --- Глобальный обработчик кастомных ошибок ---
 @app.exception_handler(AppBaseException)

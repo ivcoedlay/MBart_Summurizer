@@ -24,6 +24,6 @@ class SummaryResponse(BaseModel):
     document_id: Optional[str]
     method: str
     params: Dict[str, Any]
-    summary_text: Optional[str]
+    summary_text: Optional[str] # Может быть None, если статус не "done"
     created_at: datetime
-    status: str = Field(..., example="done")  # queued|running|done|failed
+    status: str = Field(..., example="done")
