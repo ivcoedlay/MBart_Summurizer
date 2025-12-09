@@ -1,54 +1,32 @@
-// frontend/src/pages/HomePage.tsx
-
 import React, { useState, useCallback } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { UploadCloud, FileText } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import ErrorDisplay from '../components/common/ErrorDisplay';
-import StatusBadge from '../components/common/StatusBadge';
-import { createSummary, uploadFile, getSummaryStatus } from '../api/apiService';
-import { DocumentCreateResponse, SummaryResponse, SummaryStatus } from '../types/apiTypes';
+import { uploadFile, createSummary } from '../api/apiService';
+import {
+    DocumentCreateResponse,
+    SummaryResponse,
+    SummaryCreateRequest,
+} from '../types/apiTypes';
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
 
 const HomePage: React.FC = () => {
     const [file, setFile] = useState<File | null>(null);
-    const [documentId, setDocumentId] = useState<string | null>(null);
-    const [summaryId, setSummaryId] = useState<string | null>(null);
+    const [summaryParams, setSummaryParams] = useState({
+        min_length: 50,
+        max_length: 500,
+    });
 
-    // Параметры суммаризации по умолчанию
-    const [summaryParams, setSummaryParams] = useState({ min_length: 50, max_length: 500 });
-
-    // 1. Мутация для загрузки файла
-    const uploadMutation = useMutation<DocumentCreateResponse, any, File>({
+    // Мутация для загрузки файла
+    const uploadMutation = useMutation<DocumentCreateResponse, Error, File>({
         mutationFn: uploadFile,
-        onSuccess: (data) => {
-            setDocumentId(data.id);
-            // После успешной загрузки сразу запускаем суммаризацию
-            summaryMutation.mutate({
-                document_id: data.id,
-                method: 'mbart_ru_sum_gazeta',
-                ...summaryParams,
-            });
-        },
     });
 
-    // 2. Мутация для запуска суммаризации (возвращает статус 'queued')
-    const summaryMutation = useMutation<SummaryResponse, any, Omit<SummaryCreateRequest, 'text'>>({
+    // Мутация для суммаризации
+    const summaryMutation = useMutation<SummaryResponse, Error, SummaryCreateRequest>({
         mutationFn: createSummary,
-        onSuccess: (data) => {
-            setSummaryId(data.id);
-            // React Query начнет опрос благодаря установке summaryId
-        },
-    });
-
-    // 3. Запрос для опроса статуса (Polling)
-    const { data: summaryResult, isLoading: isSummaryLoading, error: summaryError } = useQuery<SummaryResponse, any>({
-        queryKey: ['summaryStatus', summaryId],
-        queryFn: () => getSummaryStatus(summaryId!),
-        // Опрос каждые 3 секунды, пока статус не "done" или "failed"
-        enabled: !!summaryId && summaryResult?.status !== 'done' && summaryResult?.status !== 'failed',
-        refetchInterval: 3000,
     });
 
     const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -58,98 +36,37 @@ const HomePage: React.FC = () => {
             return;
         }
         setFile(acceptedFile);
-        setDocumentId(null);
-        setSummaryId(null);
     }, []);
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
-        accept: { 'application/*': ['.docx', '.odt', '.txt'] },
+        accept: {
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+            'application/vnd.oasis.opendocument.text': ['.odt'],
+            'text/plain': ['.txt'],
+        },
         multiple: false,
     });
 
     const handleSubmit = () => {
-        if (file) {
-            uploadMutation.mutate(file);
+        if (file && !uploadMutation.isPending && !summaryMutation.isPending) {
+            uploadMutation.mutate(file, {
+                onSuccess: (docResponse) => {
+                    summaryMutation.mutate({
+                        document_id: docResponse.id,
+                        method: 'mbart_ru_sum_gazeta',
+                        min_length: summaryParams.min_length,
+                        max_length: summaryParams.max_length,
+                    });
+                },
+            });
         }
     };
 
-    const currentStatus: SummaryStatus | 'uploading' | 'ready' =
-        uploadMutation.isPending ? 'uploading' :
-            summaryResult?.status ||
-            summaryMutation.isPending ? 'queued' :
-                file ? 'ready' : 'queued';
-
-
-    // --- Визуализация ---
-
-    const renderProcessingState = () => {
-        const status = summaryResult?.status || 'queued';
-        const text = status === 'queued' ? 'Задача поставлена в очередь...' :
-            status === 'running' ? 'Обрабатывается моделью, пожалуйста, подождите...' :
-                status === 'failed' ? 'Обработка завершилась с ошибкой.' : '';
-
-        return (
-            <div className="mt-8 p-6 card border-2 border-brand-primary/50 text-center">
-                <StatusBadge status={status as SummaryStatus} />
-                <p className="mt-3 text-lg font-medium">{text}</p>
-                {(status === 'running' || status === 'queued') && (
-                    <div className="mt-4">
-                        <div className="h-2 bg-brand-primary/30 rounded-full overflow-hidden">
-                            <div className="h-full bg-brand-primary w-1/2 animate-pulse" />
-                        </div>
-                    </div>
-                )}
-                {status === 'failed' && summaryResult?.error_message && (
-                    <ErrorDisplay
-                        error={{ message: summaryResult.error_message } as any}
-                        title="Ошибка суммаризации"
-                    />
-                )}
-            </div>
-        );
-    };
-
-    const renderResultView = () => {
-        if (!summaryResult || summaryResult.status !== 'done') return null;
-
-        // TODO: Получить preview_text документа для левой панели.
-        // Сейчас используем заглушку, так как бэкенд возвращает только ID
-        const previewText = "Загруженный документ успешно распарсен и его текст находится в хранилище. Для полной реализации нужен GET-запрос на /documents/{id} для получения текста.";
-
-        return (
-            <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Левая колонка: Исходный текст (Preview) */}
-                <div className="card h-[600px] overflow-hidden flex flex-col">
-                    <h4 className="text-xl font-semibold border-b pb-2 mb-4">Исходный текст</h4>
-                    <p className="whitespace-pre-wrap overflow-auto text-sm text-gray-700 flex-grow p-1">
-                        {previewText}
-                    </p>
-                </div>
-
-                {/* Правая колонка: Суммаризация */}
-                <div className="card h-[600px] flex flex-col">
-                    <h4 className="text-xl font-semibold border-b pb-2 mb-4 text-brand-primary">
-                        Результат суммаризации
-                    </h4>
-                    <p className="whitespace-pre-wrap overflow-auto text-base font-medium flex-grow p-1">
-                        {summaryResult.summary_text || "Нет данных."}
-                    </p>
-                    <div className="mt-4 border-t pt-3">
-                        <button
-                            onClick={() => navigator.clipboard.writeText(summaryResult.summary_text || '')}
-                            className="btn-secondary text-sm"
-                        >
-                            Копировать в буфер
-                        </button>
-                        <span className="text-xs text-gray-500 ml-4">
-                (ID: {summaryResult.id})
-              </span>
-                    </div>
-                </div>
-            </div>
-        );
-    };
+    const isProcessing =
+        uploadMutation.isPending ||
+        summaryMutation.isPending ||
+        (uploadMutation.isSuccess && !summaryMutation.isSuccess && !summaryMutation.isError);
 
     return (
         <div>
@@ -157,7 +74,7 @@ const HomePage: React.FC = () => {
                 Загрузка документа и AI-суммаризация
             </h2>
 
-            {/* Ошибки загрузки или запуска суммаризации */}
+            {/* Ошибки */}
             {uploadMutation.isError && (
                 <div className="mb-4">
                     <ErrorDisplay error={uploadMutation.error} title="Ошибка загрузки файла" />
@@ -165,16 +82,18 @@ const HomePage: React.FC = () => {
             )}
             {summaryMutation.isError && (
                 <div className="mb-4">
-                    <ErrorDisplay error={summaryMutation.error} title="Ошибка запуска суммаризации" />
+                    <ErrorDisplay error={summaryMutation.error} title="Ошибка суммаризации" />
                 </div>
             )}
 
-            {/* 1. Область Drag-n-Drop */}
+            {/* Drag & Drop */}
             <div
                 {...getRootProps()}
-                className={`border-2 border-dashed p-10 rounded-xl transition duration-200 
-          ${isDragActive ? 'border-brand-primary bg-brand-primary/10' : 'border-ui-neutral hover:border-brand-primary/50'}
-        `}
+                className={`border-2 border-dashed p-10 rounded-xl transition duration-200 ${
+                    isDragActive
+                        ? 'border-brand-primary bg-brand-primary/10'
+                        : 'border-ui-neutral hover:border-brand-primary/50'
+                }`}
             >
                 <input {...getInputProps()} />
                 <div className="flex flex-col items-center justify-center text-center">
@@ -182,36 +101,46 @@ const HomePage: React.FC = () => {
                     {file ? (
                         <p className="mt-2 text-lg font-medium">
                             <FileText className="inline w-5 h-5 mr-2" />
-                            Файл выбран: **{file.name}** ({Math.round(file.size / 1024)} КБ)
+                            Файл выбран: <strong>{file.name}</strong> ({Math.round(file.size / 1024)} КБ)
                         </p>
                     ) : (
                         <p className="mt-2 text-lg font-medium">
                             Перетащите файл сюда, или нажмите, чтобы выбрать файл (.docx, .odt, .txt)
                         </p>
                     )}
-                    <p className="text-sm text-gray-500 mt-1">
-                        Максимальный размер: 15 МБ.
-                    </p>
+                    <p className="text-sm text-gray-500 mt-1">Максимальный размер: 15 МБ.</p>
                 </div>
             </div>
 
-            {/* 2. Кнопка и Настройки */}
+            {/* Кнопка и параметры */}
             <div className="mt-6 flex justify-between items-center card p-4">
                 <div className="flex items-center space-x-4">
                     <label className="font-medium text-text-dark">Параметры длины:</label>
                     <input
                         type="number"
-                        min="50" max="1000"
+                        min="50"
+                        max="1000"
                         value={summaryParams.min_length}
-                        onChange={(e) => setSummaryParams(prev => ({ ...prev, min_length: parseInt(e.target.value) }))}
+                        onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            if (!isNaN(val)) {
+                                setSummaryParams((prev) => ({ ...prev, min_length: val }));
+                            }
+                        }}
                         className="w-20 p-2 border border-ui-neutral rounded-lg focus:ring-brand-primary focus:border-brand-primary"
                         title="Минимальное количество токенов"
                     />
                     <input
                         type="number"
-                        min="50" max="1000"
+                        min="50"
+                        max="1000"
                         value={summaryParams.max_length}
-                        onChange={(e) => setSummaryParams(prev => ({ ...prev, max_length: parseInt(e.target.value) }))}
+                        onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            if (!isNaN(val)) {
+                                setSummaryParams((prev) => ({ ...prev, max_length: val }));
+                            }
+                        }}
                         className="w-20 p-2 border border-ui-neutral rounded-lg focus:ring-brand-primary focus:border-brand-primary"
                         title="Максимальное количество токенов"
                     />
@@ -220,25 +149,45 @@ const HomePage: React.FC = () => {
                 <button
                     onClick={handleSubmit}
                     className="btn-primary flex items-center"
-                    disabled={!file || uploadMutation.isPending || summaryMutation.isPending}
+                    disabled={!file || isProcessing}
                 >
-                    {uploadMutation.isPending
-                        ? 'Загрузка...'
-                        : summaryMutation.isPending || (summaryResult && summaryResult.status !== 'done' && summaryResult.status !== 'failed')
-                            ? 'Обработка запущена...'
-                            : 'Запустить Суммаризацию'
-                    }
+                    {isProcessing ? 'Обработка...' : 'Запустить Суммаризацию'}
                 </button>
             </div>
 
-            {/* 3. Отображение статуса и результата */}
-            {(uploadMutation.isPending || summaryMutation.isPending || isSummaryLoading || summaryResult?.status === 'running' || summaryResult?.status === 'queued' || summaryResult?.status === 'failed') &&
-                renderProcessingState()
-            }
+            {/* Результат */}
+            {summaryMutation.isSuccess && summaryMutation.data && (
+                <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Исходный текст (превью) */}
+                    <div className="card h-[600px] overflow-hidden flex flex-col">
+                        <h4 className="text-xl font-semibold border-b pb-2 mb-4">Исходный текст</h4>
+                        <p className="whitespace-pre-wrap overflow-auto text-sm text-gray-700 flex-grow p-1">
+                            {uploadMutation.data?.parsed_preview || 'Текст не доступен'}
+                        </p>
+                    </div>
 
-            {summaryResult?.status === 'done' &&
-                renderResultView()
-            }
+                    {/* Результат суммаризации */}
+                    <div className="card h-[600px] flex flex-col">
+                        <h4 className="text-xl font-semibold border-b pb-2 mb-4 text-brand-primary">
+                            Результат суммаризации
+                        </h4>
+                        <p className="whitespace-pre-wrap overflow-auto text-base font-medium flex-grow p-1">
+                            {summaryMutation.data.summary_text || 'Нет данных.'}
+                        </p>
+                        <div className="mt-4 border-t pt-3">
+                            <button
+                                onClick={() =>
+                                    navigator.clipboard.writeText(summaryMutation.data.summary_text || '')
+                                }
+                                className="btn-secondary text-sm"
+                            >
+                                Копировать в буфер
+                            </button>
+                            <span className="text-xs text-gray-500 ml-4">(ID: {summaryMutation.data.id})</span>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

@@ -55,11 +55,13 @@ export interface DocumentDetailResponse extends DocumentListItem {
 
 // --- Суммаризация (Summaries) ---
 
+// frontend/src/types/apiTypes.ts
 export interface SummaryCreateRequest {
-  document_id: string;
-  method: 'mbart_ru_sum_gazeta'; // или другой метод
-  min_length: number;
-  max_length: number;
+  document_id?: string;
+  text?: string;
+  min_length?: number;
+  max_length?: number;
+  method?: 'mbart_ru_sum_gazeta'; // или string, если методов будет больше
 }
 
 export interface SummaryResponse {
@@ -79,5 +81,9 @@ export interface SummaryResponse {
 export interface DocumentCreateResponse {
   id: string;
   filename: string;
-  message: string;
+  mime_type: string;
+  size_bytes: number;
+  uploaded_at: string; // ISO 8601
+  parsed: boolean;
+  parsed_preview?: string; // ← ДОБАВЬТЕ ЭТУ СТРОКУ
 }
