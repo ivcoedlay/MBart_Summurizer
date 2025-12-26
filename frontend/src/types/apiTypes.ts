@@ -47,10 +47,16 @@ export interface DocumentListResponse {
   items: DocumentListItem[];
 }
 
-export interface DocumentDetailResponse extends DocumentListItem {
-  mime_type: string;
-  parsed_text: string | null;
-  storage_ref: string;
+export interface DocumentDetailResponse {
+  id: string;
+  filename: string;
+  content_type: string;
+  size: number;
+  status: 'processing' | 'completed' | 'failed'; // Важно!
+  created_at: string; // Важно!
+  parsed_text?: string;
+  summary?: string; // Важно!
+  error_message?: string;
 }
 
 // --- Суммаризация (Summaries) ---
@@ -61,7 +67,7 @@ export interface SummaryCreateRequest {
   text?: string;
   min_length?: number;
   max_length?: number;
-  method?: 'mbart_ru_sum_gazeta'; // или string, если методов будет больше
+  method?: string; // или string, если методов будет больше
 }
 
 export interface SummaryResponse {

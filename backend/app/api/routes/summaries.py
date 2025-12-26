@@ -1,5 +1,5 @@
-# backend/app/api/routes/summaries.py
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks  # << BackgroundTasks - НОВЫЙ ИМПОРТ
+
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from backend.app.api.schemas.summaries import SummaryCreateRequest, SummaryResponse
 from backend.app.api.schemas.common import ErrorResponse
 
@@ -66,8 +66,8 @@ async def run_summarization_task(
 )
 async def create_summary(
         body: SummaryCreateRequest,
-        summarizer: SummarizationGateway = Depends(get_summarizer),
-        background_tasks: BackgroundTasks = Depends(),  # << НОВЫЙ ПАРАМЕТР
+        background_tasks: BackgroundTasks,
+        summarizer: SummarizationGateway = Depends(get_summarizer)
 ):
     """
     Создаёт запись о суммарзиации и запускает задачу в фоне.

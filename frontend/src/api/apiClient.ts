@@ -1,17 +1,15 @@
-// frontend/src/api/apiClient.ts
-
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { ErrorResponse, CustomError } from '../types/apiTypes';
 
-// Настройка базового URL для бэкенда FastAPI
+// Vite автоматически подхватит типы из vite-env.d.ts
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
 const apiClient: AxiosInstance = axios.create({
-  baseURL: BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  timeout: 3000, // Таймаут 3 секунды
+    baseURL: BASE_URL,
+    headers: {
+        'Content-Type': 'application/json',
+    },
+    timeout: 5000,
 });
 
 /**

@@ -1,5 +1,3 @@
-// frontend/src/pages/HistoryPage.tsx
-
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { UploadCloud, FileText } from 'lucide-react';
@@ -7,15 +5,13 @@ import { useDropzone } from 'react-dropzone';
 import ErrorDisplay from '../components/common/ErrorDisplay';
 import StatusBadge from '../components/common/StatusBadge';
 import { createSummary, uploadFile, getSummaryStatus } from '../api/apiService';
-import { DocumentCreateResponse, SummaryResponse, SummaryStatus, CustomError } from '../types/apiTypes';
-
-// Тип запроса суммаризации (если не экспортирован)
-interface SummaryCreateRequest {
-    document_id: string;
-    method: string;
-    min_length: number;
-    max_length: number;
-}
+import {
+    DocumentCreateResponse,
+    SummaryResponse,
+    SummaryStatus,
+    CustomError,
+    SummaryCreateRequest
+} from '../types/apiTypes';
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
 
@@ -51,9 +47,10 @@ const HistoryPage: React.FC = () => {
         mutationFn: uploadFile,
         onSuccess: (data) => {
             setDocumentId(data.id);
+            // Исправление TS2322: передаем "mbart_ru_sum_gazeta" как константу
             summaryMutation.mutate({
                 document_id: data.id,
-                method: 'mbart_ru_sum_gazeta',
+                method: "mbart_ru_sum_gazeta",
                 ...summaryParams,
             });
         },
@@ -68,47 +65,36 @@ const HistoryPage: React.FC = () => {
     });
 
     // 3. Опрос статуса
+    // Исправление TS2339: Извлекаем именно 'data' и переименовываем в 'summaryResult'
     const {
-        summaryResult, // ← правильно: data, а не summaryResult
+        data: summaryResult,
         isLoading: isSummaryLoading,
-        error: summaryError, // сохраняем, даже если не рендерим сейчас
+        error: summaryError,
     } = useQuery<SummaryResponse, unknown>({
         queryKey: ['summaryStatus', summaryId],
         queryFn: () => getSummaryStatus(summaryId!),
         enabled: !!summaryId,
-        refetchInterval: (data) => {
+        refetchInterval: (query) => {
+            // Исправление TS2339: в v5 в refetchInterval приходит объект query,
+            // состояние проверяем через query.state.data
+            const data = query.state.data as SummaryResponse | undefined;
             if (!data) return 3000;
             return data.status === 'done' || data.status === 'failed' ? false : 3000;
         },
     });
 
-    // Вычисляем currentStatus после объявления summaryResult
-    const currentStatus = useMemo<SummaryStatus | 'uploading' | 'ready'>(() => {
+    // Вычисляем текущий статус для UI
+    const currentStatus = useMemo<SummaryStatus | 'uploading' | 'ready' | 'queued'>(() => {
         if (uploadMutation.isPending) return 'uploading';
         if (summaryMutation.isPending) return 'queued';
-        if (summaryResult?.status) return summaryResult.status;
+        if (summaryResult?.status) return summaryResult.status as SummaryStatus;
         return file ? 'ready' : 'queued';
     }, [uploadMutation.isPending, summaryMutation.isPending, summaryResult?.status, file]);
 
-    // 🔸 Используем summaryError хотя бы в useEffect (чтобы TS не ругался на "never read")
-    // Например, для будущего логгирования или отладки
+    // Логгирование ошибок (для фиксации неиспользуемых переменных)
     useEffect(() => {
-        if (summaryError) {
-            console.warn('Ошибка при опросе статуса суммаризации:', summaryError);
-        }
+        if (summaryError) console.error('Polling error:', summaryError);
     }, [summaryError]);
-
-    // Также можно использовать documentId и currentStatus в логах/отладке
-    useEffect(() => {
-        if (documentId) {
-            console.debug('Загружен документ с ID:', documentId);
-        }
-    }, [documentId]);
-
-    useEffect(() => {
-        // currentStatus может использоваться позже
-        // console.debug('Текущий статус:', currentStatus);
-    }, [currentStatus]);
 
     const onDrop = useCallback((acceptedFiles: File[]) => {
         const acceptedFile = acceptedFiles[0];
@@ -123,7 +109,7 @@ const HistoryPage: React.FC = () => {
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
-        accept: { 'application/*': ['.docx', '.odt', '.txt'] },
+        accept: { 'application/*': ['.docx', '.odt', '.txt', '.pdf'] },
         multiple: false,
     });
 
@@ -143,24 +129,28 @@ const HistoryPage: React.FC = () => {
                     : 'Обработка завершилась с ошибкой.';
 
         return (
-            <div className="mt-8 p-6 card border-2 border-brand-primary/50 text-center">
-                <StatusBadge status={status} />
-                <p className="mt-3 text-lg font-medium">{text}</p>
+            <div className="mt-8 p-6 card border-2 border-brand-primary/50 text-center bg-white rounded-xl shadow-minimal">
+                <div className="flex justify-center mb-4">
+                    <StatusBadge status={status as any} />
+                </div>
+                <p className="mt-3 text-lg font-medium text-text-dark">{text}</p>
                 {(status === 'running' || status === 'queued') && (
-                    <div className="mt-4">
-                        <div className="h-2 bg-brand-primary/30 rounded-full overflow-hidden">
-                            <div className="h-full bg-brand-primary w-1/2 animate-pulse" />
+                    <div className="mt-4 max-w-md mx-auto">
+                        <div className="h-2 bg-brand-primary/20 rounded-full overflow-hidden">
+                            <div className="h-full bg-brand-primary animate-progress-indeterminate" style={{ width: '50%' }} />
                         </div>
                     </div>
                 )}
                 {status === 'failed' && summaryResult?.error_message && (
-                    <ErrorDisplay
-                        error={{
-                            name: 'SummarizationRuntimeError',
-                            message: summaryResult.error_message,
-                        }}
-                        title="Ошибка суммаризации"
-                    />
+                    <div className="mt-4">
+                        <ErrorDisplay
+                            error={{
+                                name: 'SummarizationError',
+                                message: summaryResult.error_message,
+                            }}
+                            title="Ошибка суммаризации"
+                        />
+                    </div>
                 )}
             </div>
         );
@@ -169,33 +159,36 @@ const HistoryPage: React.FC = () => {
     const renderResultView = () => {
         if (!summaryResult || summaryResult.status !== 'done') return null;
 
-        const previewText = "Загруженный документ успешно распарсен и его текст находится в хранилище. Для полной реализации нужен GET-запрос на /documents/{id} для получения текста.";
-
         return (
             <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="card h-[600px] overflow-hidden flex flex-col">
-                    <h4 className="text-xl font-semibold border-b pb-2 mb-4">Исходный текст</h4>
-                    <p className="whitespace-pre-wrap overflow-auto text-sm text-gray-700 flex-grow p-1">
-                        {previewText}
-                    </p>
+                <div className="card bg-white p-6 rounded-xl shadow-minimal flex flex-col h-[500px]">
+                    <h4 className="text-xl font-semibold border-b pb-2 mb-4 flex items-center">
+                        <FileText className="w-5 h-5 mr-2 text-brand-primary" />
+                        Документ
+                    </h4>
+                    <div className="bg-ui-neutral/30 p-4 rounded-lg overflow-auto flex-grow text-sm text-gray-700">
+                        {documentId ? `Документ #${documentId} успешно загружен и обработан.` : 'Текст документа доступен в базе.'}
+                    </div>
                 </div>
 
-                <div className="card h-[600px] flex flex-col">
+                <div className="card bg-white p-6 rounded-xl shadow-minimal flex flex-col h-[500px] border-l-4 border-brand-primary">
                     <h4 className="text-xl font-semibold border-b pb-2 mb-4 text-brand-primary">
                         Результат суммаризации
                     </h4>
-                    <p className="whitespace-pre-wrap overflow-auto text-base font-medium flex-grow p-1">
-                        {summaryResult.summary_text || "Нет данных."}
-                    </p>
-                    <div className="mt-4 border-t pt-3">
+                    <div className="overflow-auto flex-grow">
+                        <p className="text-base leading-relaxed text-text-dark whitespace-pre-wrap">
+                            {summaryResult.summary_text || "Текст отсутствует."}
+                        </p>
+                    </div>
+                    <div className="mt-4 border-t pt-3 flex justify-between items-center">
                         <button
                             onClick={() => navigator.clipboard.writeText(summaryResult.summary_text || '')}
-                            className="btn-secondary text-sm"
+                            className="btn-secondary py-1 px-3 text-sm"
                         >
-                            Копировать в буфер
+                            Копировать
                         </button>
-                        <span className="text-xs text-gray-500 ml-4">
-                            (ID: {summaryResult.id})
+                        <span className="text-xs text-gray-400 font-mono">
+                            ID: {summaryResult.id.substring(0, 8)}...
                         </span>
                     </div>
                 </div>
@@ -204,119 +197,95 @@ const HistoryPage: React.FC = () => {
     };
 
     return (
-        <div>
+        <div className="max-w-6xl mx-auto px-4">
             <h2 className="text-3xl font-extrabold text-text-dark mb-6">
-                Загрузка документа и AI-суммаризация
+                Суммаризация документа
             </h2>
 
-            {/* Ошибки */}
-            {uploadMutation.isError && (
-                <div className="mb-4">
+            {/* Блок ошибок */}
+            <div className="space-y-4 mb-6">
+                {uploadMutation.isError && (
                     <ErrorDisplay
                         error={toCustomError(uploadMutation.error)}
-                        title="Ошибка загрузки файла"
+                        title="Ошибка загрузки"
                     />
-                </div>
-            )}
-            {summaryMutation.isError && (
-                <div className="mb-4">
+                )}
+                {summaryMutation.isError && (
                     <ErrorDisplay
                         error={toCustomError(summaryMutation.error)}
-                        title="Ошибка запуска суммаризации"
+                        title="Ошибка API"
                     />
-                </div>
-            )}
-            {/* Можно раскомментировать, если захотите показывать ошибку опроса */}
-            {/* {summaryError && (
-                <div className="mb-4">
-                    <ErrorDisplay
-                        error={toCustomError(summaryError)}
-                        title="Ошибка получения статуса"
-                    />
-                </div>
-            )} */}
+                )}
+            </div>
 
-            {/* Drag & Drop */}
+            {/* Зона загрузки */}
             <div
                 {...getRootProps()}
-                className={`border-2 border-dashed p-10 rounded-xl transition duration-200 
-          ${isDragActive ? 'border-brand-primary bg-brand-primary/10' : 'border-ui-neutral hover:border-brand-primary/50'}
-        `}
+                className={`border-2 border-dashed p-10 rounded-xl transition-all cursor-pointer
+                    ${isDragActive ? 'border-brand-primary bg-brand-primary/5' : 'border-ui-neutral hover:border-brand-primary/40 bg-white'}
+                `}
             >
                 <input {...getInputProps()} />
-                <div className="flex flex-col items-center justify-center text-center">
-                    <UploadCloud className="w-12 h-12 text-brand-primary" />
+                <div className="flex flex-col items-center text-center">
+                    <UploadCloud className={`w-14 h-14 mb-4 ${isDragActive ? 'text-brand-primary' : 'text-gray-400'}`} />
                     {file ? (
-                        <p className="mt-2 text-lg font-medium">
-                            <FileText className="inline w-5 h-5 mr-2" />
-                            Файл выбран: <strong>{file.name}</strong> ({Math.round(file.size / 1024)} КБ)
-                        </p>
+                        <div className="text-lg">
+                            <span className="font-bold text-brand-primary">{file.name}</span>
+                            <p className="text-sm text-gray-500">{(file.size / 1024).toFixed(1)} КБ</p>
+                        </div>
                     ) : (
-                        <p className="mt-2 text-lg font-medium">
-                            Перетащите файл сюда, или нажмите, чтобы выбрать файл (.docx, .odt, .txt)
-                        </p>
+                        <div>
+                            <p className="text-lg font-medium text-text-dark">Выберите файл или перетащите его сюда</p>
+                            <p className="text-sm text-gray-400 mt-2">Поддерживаются .docx, .odt, .txt (до 15 МБ)</p>
+                        </div>
                     )}
-                    <p className="text-sm text-gray-500 mt-1">Максимальный размер: 15 МБ.</p>
                 </div>
             </div>
 
-            {/* Параметры и кнопка */}
-            <div className="mt-6 flex justify-between items-center card p-4">
-                <div className="flex items-center space-x-4">
-                    <label className="font-medium text-text-dark">Параметры длины:</label>
-                    <input
-                        type="number"
-                        min="50"
-                        max="1000"
-                        value={summaryParams.min_length}
-                        onChange={(e) =>
-                            setSummaryParams((prev) => ({
-                                ...prev,
-                                min_length: Math.max(50, parseInt(e.target.value) || 50),
-                            }))
-                        }
-                        className="w-20 p-2 border border-ui-neutral rounded-lg focus:ring-brand-primary focus:border-brand-primary"
-                        title="Минимальное количество токенов"
-                    />
-                    <input
-                        type="number"
-                        min="50"
-                        max="1000"
-                        value={summaryParams.max_length}
-                        onChange={(e) =>
-                            setSummaryParams((prev) => ({
-                                ...prev,
-                                max_length: Math.min(1000, Math.max(50, parseInt(e.target.value) || 500)),
-                            }))
-                        }
-                        className="w-20 p-2 border border-ui-neutral rounded-lg focus:ring-brand-primary focus:border-brand-primary"
-                        title="Максимальное количество токенов"
-                    />
+            {/* Управление */}
+            <div className="mt-6 flex flex-wrap gap-4 items-center justify-between bg-white p-6 rounded-xl shadow-minimal border border-ui-neutral/50">
+                <div className="flex items-center space-x-6">
+                    <div className="flex flex-col">
+                        <label className="text-xs font-bold text-gray-500 uppercase mb-1">Мин. токенов</label>
+                        <input
+                            type="number"
+                            value={summaryParams.min_length}
+                            onChange={(e) => setSummaryParams(p => ({ ...p, min_length: parseInt(e.target.value) || 10 }))}
+                            className="w-24 p-2 border rounded-md"
+                        />
+                    </div>
+                    <div className="flex flex-col">
+                        <label className="text-xs font-bold text-gray-500 uppercase mb-1">Макс. токенов</label>
+                        <input
+                            type="number"
+                            value={summaryParams.max_length}
+                            onChange={(e) => setSummaryParams(p => ({ ...p, max_length: parseInt(e.target.value) || 100 }))}
+                            className="w-24 p-2 border rounded-md"
+                        />
+                    </div>
                 </div>
 
                 <button
                     onClick={handleSubmit}
-                    className="btn-primary flex items-center"
-                    disabled={!file || uploadMutation.isPending || summaryMutation.isPending}
+                    disabled={!file || uploadMutation.isPending || summaryMutation.isPending || (summaryResult?.status === 'running')}
+                    className="btn-primary px-8 py-3 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                    {uploadMutation.isPending
-                        ? 'Загрузка...'
-                        : summaryMutation.isPending || (summaryResult && summaryResult.status !== 'done')
-                            ? 'Обработка запущена...'
-                            : 'Запустить Суммаризацию'}
+                    {uploadMutation.isPending ? 'Загрузка...' :
+                        summaryMutation.isPending || summaryResult?.status === 'running' || summaryResult?.status === 'queued' ?
+                            'В процессе...' : 'Начать анализ'}
                 </button>
             </div>
 
-            {/* Состояние обработки и результат */}
+            {/* Результаты и состояния */}
             {(uploadMutation.isPending ||
-                    summaryMutation.isPending ||
-                    isSummaryLoading ||
-                    summaryResult?.status === 'running' ||
-                    summaryResult?.status === 'queued' ||
-                    summaryResult?.status === 'failed') &&
-                renderProcessingState()}
-
-            {summaryResult?.status === 'done' && renderResultView()}
+                summaryMutation.isPending ||
+                isSummaryLoading ||
+                (summaryResult && summaryResult.status !== 'ready')) && (
+                <div className="mt-2">
+                    { (summaryResult?.status === 'running' || summaryResult?.status === 'queued' || summaryResult?.status === 'failed') && renderProcessingState() }
+                    { summaryResult?.status === 'done' && renderResultView() }
+                </div>
+            )}
         </div>
     );
 };
