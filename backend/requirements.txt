@@ -10,7 +10,6 @@ motor
 pymongo
 
 # Парсинг файлов
-python-magic
 python-magic-bin
 python-docx
 odfpy
@@ -20,6 +19,9 @@ transformers
 torch
 sentencepiece
 accelerate
+protobuf
+hf_xet
 
 # Дополнительно
 aiofiles
+python-multipart
