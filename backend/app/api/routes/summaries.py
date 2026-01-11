@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from backend.app.api.schemas.summaries import SummaryCreateRequest, SummaryResponse
 from backend.app.api.schemas.common import ErrorResponse
@@ -6,18 +7,25 @@ from backend.app.infrastructure.summarization.mbart_gateway import Summarization
 from backend.app.api.dependencies import get_summarizer
 from backend.app.core.errors import SummarizationError
 
+# Проверка режима работы
+USE_CELERY = os.getenv("USE_CELERY", "false").lower() == "true"
+
+if USE_CELERY:
+    from backend.app.workers.summarization_worker import summarization_task
+
 router = APIRouter(
     prefix="/summaries",
     tags=["Summaries"]
 )
 
-# Блокирующая задача (имитация воркера)
+
+# Фоновая задача для режима BackgroundTasks
 async def run_summarization_task(
-    summary_id: str,
-    text_to_summarize: str,
-    min_length: int,
-    max_length: int,
-    summarizer: SummarizationGateway,
+        summary_id: str,
+        text_to_summarize: str,
+        min_length: int,
+        max_length: int,
+        summarizer: SummarizationGateway,
 ):
     """
     Выполняет суммаризацию и обновляет модель в БД. Запускается в фоне.
@@ -27,7 +35,6 @@ async def run_summarization_task(
         return
 
     await summary_model.set({"status": "running"})
-
     try:
         summary_text = await summarizer.summarize(
             text=text_to_summarize,
@@ -56,15 +63,16 @@ async def run_summarization_task(
     }
 )
 async def create_summary(
-    body: SummaryCreateRequest,
-    background_tasks: BackgroundTasks,
-    summarizer: SummarizationGateway = Depends(get_summarizer)
+        body: SummaryCreateRequest,
+        background_tasks: BackgroundTasks,
+        summarizer: SummarizationGateway = Depends(get_summarizer)
 ):
     """
-    Создаёт запись о суммарзиации и запускает задачу в фоне.
+    Создаёт запись о суммарзиации.
+    В режиме Celery - отправляет задачу в очередь.
+    В режиме BackgroundTasks - запускает задачу в фоне.
     """
     text_to_summarize = ""
-
     if body.document_id:
         doc = await DocumentModel.get(body.document_id)
         if not doc or not doc.parsed_text:
@@ -81,25 +89,43 @@ async def create_summary(
             detail="Необходимо предоставить 'document_id' или 'text'.",
         )
 
+    # Валидация параметров
+    if body.min_length and body.max_length and body.min_length > body.max_length:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="min_length не может быть больше max_length"
+        )
+
     new_summary = SummaryModel(
         document_id=body.document_id,
-        method=body.method,
+        method=body.method or "mbart_ru_sum_gazeta",
         params={"min_length": body.min_length, "max_length": body.max_length},
         summary_text=None,
         status="queued"
     )
     await new_summary.insert()
 
-    background_tasks.add_task(
-        run_summarization_task,
-        summary_id=str(new_summary.id),
-        text_to_summarize=text_to_summarize,
-        min_length=body.min_length,
-        max_length=body.max_length,
-        summarizer=summarizer
-    )
+    # Режим работы определяет как запускается задача
+    if USE_CELERY:
+        # Отправка задачи в Celery
+        summarization_task.delay(
+            str(new_summary.id),
+            text_to_summarize,
+            body.min_length or 50,
+            body.max_length or 500
+        )
+    else:
+        # Запуск в фоновом режиме FastAPI
+        background_tasks.add_task(
+            run_summarization_task,
+            summary_id=str(new_summary.id),
+            text_to_summarize=text_to_summarize,
+            min_length=body.min_length or 50,
+            max_length=body.max_length or 500,
+            summarizer=summarizer
+        )
 
-    # 4. Ответ (немедленный)
+    # Ответ (немедленный) с текущим состоянием
     return SummaryResponse(
         id=str(new_summary.id),
         document_id=new_summary.document_id,
@@ -112,7 +138,7 @@ async def create_summary(
     )
 
 
-# получение по summary_id
+# Остальные эндпоинты остаются без изменений
 @router.get(
     "/{summary_id}",
     response_model=SummaryResponse,
@@ -141,7 +167,6 @@ async def get_summary_detail(summary_id: str):
     )
 
 
-# НОВЫЙ РОУТ: Получение суммаризации по document_id
 @router.get(
     "/by-document/{document_id}",
     response_model=SummaryResponse,
@@ -155,13 +180,11 @@ async def get_summary_by_document(document_id: str):
     summary = await SummaryModel.find_one(
         SummaryModel.document_id == document_id
     ).sort("-created_at")
-
     if not summary:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Суммаризация для документа '{document_id}' не найдена."
         )
-
     return SummaryResponse(
         id=str(summary.id),
         document_id=summary.document_id,

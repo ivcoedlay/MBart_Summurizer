@@ -1,0 +1,21 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Установка зависимостей для python-magic
+RUN apt-get update && apt-get install -y \
+    libmagic1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Копирование зависимостей и установка
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Копирование кода
+COPY . .
+
+# Установка watchdog для перезагрузки при изменениях
+RUN pip install watchdog
+
+# Команда для запуска в режиме разработки с перезагрузкой
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - APP_SECRET_KEY=dev_secret_key_here
+      - USE_CELERY=true
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - summarizer-network
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    command: celery -A app.workers.summarization_worker.celery_app worker --loglevel=info --concurrency=1
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - APP_SECRET_KEY=dev_secret_key_here
+      - USE_CELERY=true
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - summarizer-network
+
+  mongodb:
+    image: mongo:6
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - summarizer-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - summarizer-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_BASE_URL=http://api:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - api
+    networks:
+      - summarizer-network
+
+volumes:
+  mongo-data:
+
+networks:
+  summarizer-network:
+    driver: bridge

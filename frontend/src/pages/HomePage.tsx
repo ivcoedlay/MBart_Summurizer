@@ -1,15 +1,15 @@
-// frontend/src/pages/HomePage.tsx
 import React, { useState, useCallback, useEffect } from 'react';
-import { useMutation } from '@tanstack/react-query';
-import { UploadCloud, FileText, AlertCircle, Loader2 } from 'lucide-react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { UploadCloud, FileText, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import ErrorDisplay from '../components/common/ErrorDisplay';
-import { uploadFile, createSummary } from '../api/apiService';
+import { uploadFile, createSummary, getSummaryStatus } from '../api/apiService';
 import {
     DocumentCreateResponse,
     SummaryResponse,
     SummaryCreateRequest,
     CustomError,
+    SummaryStatus,
 } from '../types/apiTypes';
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
@@ -23,7 +23,6 @@ const toCustomError = (error: unknown): CustomError => {
             stack: error.stack,
         };
     }
-
     if (typeof error === 'object' && error !== null) {
         const err = error as Record<string, unknown>;
         return {
@@ -35,7 +34,6 @@ const toCustomError = (error: unknown): CustomError => {
             stack: typeof err.stack === 'string' ? err.stack : undefined,
         };
     }
-
     return {
         name: 'UnknownError',
         message: 'Неизвестная ошибка: ' + String(error),
@@ -49,15 +47,30 @@ const HomePage: React.FC = () => {
         max_length: 500,
     });
     const [validationError, setValidationError] = useState<string | null>(null);
+    const [summaryId, setSummaryId] = useState<string | null>(null);
 
     // Мутация для загрузки файла
     const uploadMutation = useMutation<DocumentCreateResponse, Error, File>({
         mutationFn: uploadFile,
     });
 
-    // Мутация для суммаризации
+    // Мутация для создания суммаризации
     const summaryMutation = useMutation<SummaryResponse, Error, SummaryCreateRequest>({
         mutationFn: createSummary,
+        onSuccess: (data) => {
+            setSummaryId(data.id);
+        },
+    });
+
+    // Опрос статуса суммаризации
+    const summaryQuery = useQuery<SummaryResponse>({
+        queryKey: ['summaryStatus', summaryId],
+        queryFn: () => getSummaryStatus(summaryId!),
+        enabled: !!summaryId,
+        refetchInterval: (query) => {
+            const data = query.state.data as SummaryResponse | undefined;
+            return data?.status === 'done' || data?.status === 'failed' ? false : 3000;
+        },
     });
 
     // Эффект для валидации параметров
@@ -81,6 +94,8 @@ const HomePage: React.FC = () => {
         }
         setFile(acceptedFile);
         setValidationError(null);
+        // Сброс предыдущих результатов при новом выборе файла
+        setSummaryId(null);
     }, []);
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -98,11 +113,11 @@ const HomePage: React.FC = () => {
             setValidationError('Пожалуйста, выберите файл для загрузки');
             return;
         }
-
         if (validationError) {
             return;
         }
 
+        setSummaryId(null); // Сброс предыдущего ID суммаризации
         uploadMutation.mutate(file, {
             onSuccess: (docResponse) => {
                 summaryMutation.mutate({
@@ -121,7 +136,14 @@ const HomePage: React.FC = () => {
     const isProcessing =
         uploadMutation.isPending ||
         summaryMutation.isPending ||
-        (uploadMutation.isSuccess && !summaryMutation.isSuccess && !summaryMutation.isError);
+        (!!summaryId && (summaryQuery.data?.status === 'queued' || summaryQuery.data?.status === 'running'));
+
+    const currentStatus = summaryQuery.data?.status ||
+        (summaryMutation.isSuccess ? 'queued' : null);
+
+    // Получаем актуальный результат суммаризации (из опроса или из мутации)
+    const summaryResult = summaryQuery.isSuccess ? summaryQuery.data :
+        summaryMutation.isSuccess ? summaryMutation.data : null;
 
     return (
         <div>
@@ -151,7 +173,16 @@ const HomePage: React.FC = () => {
                 <div className="mb-4">
                     <ErrorDisplay
                         error={toCustomError(summaryMutation.error)}
-                        title="Ошибка суммаризации"
+                        title="Ошибка создания задачи суммаризации"
+                    />
+                </div>
+            )}
+
+            {summaryQuery.isError && (
+                <div className="mb-4">
+                    <ErrorDisplay
+                        error={toCustomError(summaryQuery.error)}
+                        title="Ошибка получения статуса суммаризации"
                     />
                 </div>
             )}
@@ -236,7 +267,7 @@ const HomePage: React.FC = () => {
                     {isProcessing ? (
                         <>
                             <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                            Обработка...
+                            {currentStatus === 'queued' ? 'В очереди...' : 'Обработка...'}
                         </>
                     ) : (
                         'Запустить Суммаризацию'
@@ -244,15 +275,63 @@ const HomePage: React.FC = () => {
                 </button>
             </div>
 
+            {/* Индикатор прогресса при обработке */}
+            {(summaryMutation.isSuccess || summaryQuery.isFetching) && currentStatus && (
+                <div className="mt-6 card p-4 bg-brand-primary/5 border border-brand-primary/20">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center">
+                            {currentStatus === 'running' && <Loader2 className="w-5 h-5 mr-3 animate-spin text-brand-primary" />}
+                            {currentStatus === 'queued' && <div className="w-5 h-5 mr-3 rounded-full bg-brand-primary/30 animate-pulse" />}
+                            {currentStatus === 'done' && <CheckCircle2 className="w-5 h-5 mr-3 text-green-500" />}
+                            {currentStatus === 'failed' && <AlertCircle className="w-5 h-5 mr-3 text-red-500" />}
+
+                            <span className="font-medium">
+                {currentStatus === 'queued' && 'Задача добавлена в очередь обработки'}
+                                {currentStatus === 'running' && 'Нейросеть анализирует текст... Пожалуйста, подождите'}
+                                {currentStatus === 'done' && 'Суммаризация успешно завершена'}
+                                {currentStatus === 'failed' && 'Ошибка при суммаризации'}
+              </span>
+                        </div>
+                        {summaryId && (
+                            <span className="text-xs font-mono bg-ui-neutral/20 px-2 py-1 rounded">
+                ID: {summaryId.substring(0, 8)}...
+              </span>
+                        )}
+                    </div>
+
+                    {/* Индикатор загрузки */}
+                    {(currentStatus === 'queued' || currentStatus === 'running') && (
+                        <div className="mt-3 h-2 bg-ui-neutral/30 rounded-full overflow-hidden">
+                            <div
+                                className={`h-full rounded-full transition-all duration-500 ${
+                                    currentStatus === 'queued'
+                                        ? 'bg-brand-primary/50 animate-pulse'
+                                        : 'bg-brand-primary animate-[progress-bar_2s_ease-in-out_infinite]'
+                                }`}
+                                style={{ width: currentStatus === 'queued' ? '25%' : '50%' }}
+                            ></div>
+                        </div>
+                    )}
+
+                    {currentStatus === 'failed' && summaryQuery.data?.error_message && (
+                        <div className="mt-3 text-sm text-red-600 p-2 bg-red-50 rounded border border-red-100">
+                            {summaryQuery.data.error_message}
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* Результат */}
-            {summaryMutation.isSuccess && summaryMutation.data && (
+            {summaryResult && currentStatus === 'done' && (
                 <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
                     {/* Исходный текст (превью) */}
                     <div className="card h-[600px] overflow-hidden flex flex-col">
                         <h4 className="text-xl font-semibold border-b pb-2 mb-4">Исходный текст</h4>
-                        <p className="whitespace-pre-wrap overflow-auto text-sm text-gray-700 flex-grow p-1">
-                            {uploadMutation.data?.parsed_preview || 'Текст не доступен'}
-                        </p>
+                        <div className="bg-ui-neutral/10 p-4 rounded-lg h-full overflow-auto">
+                            <p className="whitespace-pre-wrap text-sm text-gray-700">
+                                {uploadMutation.data?.parsed_preview || 'Текст не доступен'}
+                            </p>
+                        </div>
                     </div>
 
                     {/* Результат суммаризации */}
@@ -260,19 +339,22 @@ const HomePage: React.FC = () => {
                         <h4 className="text-xl font-semibold border-b pb-2 mb-4 text-brand-primary">
                             Результат суммаризации
                         </h4>
-                        <p className="whitespace-pre-wrap overflow-auto text-base font-medium flex-grow p-1">
-                            {summaryMutation.data.summary_text || 'Нет данных.'}
-                        </p>
-                        <div className="mt-4 border-t pt-3">
+                        <div className="bg-brand-primary/5 p-4 rounded-lg h-full overflow-auto flex-grow">
+                            <p className="whitespace-pre-wrap text-base font-medium text-text-dark">
+                                {summaryResult.summary_text || 'Нет данных.'}
+                            </p>
+                        </div>
+
+                        <div className="mt-4 border-t pt-3 flex justify-between items-center">
                             <button
-                                onClick={() =>
-                                    navigator.clipboard.writeText(summaryMutation.data.summary_text || '')
-                                }
-                                className="btn-secondary text-sm"
+                                onClick={() => navigator.clipboard.writeText(summaryResult.summary_text || '')}
+                                className="btn-secondary text-sm px-4 py-2"
                             >
                                 Копировать в буфер
                             </button>
-                            <span className="text-xs text-gray-500 ml-4">(ID: {summaryMutation.data.id})</span>
+                            <span className="text-xs text-gray-500">
+                (ID: {summaryResult.id})
+              </span>
                         </div>
                     </div>
                 </div>

@@ -25,3 +25,7 @@ hf_xet
 # Дополнительно
 aiofiles
 python-multipart
+
+# Для асинхронной обработки с Celery
+celery[redis]
+redis
