@@ -1,5 +1,4 @@
 // frontend/src/api/apiService.ts
-
 import apiClient from './apiClient';
 import {
   DocumentCreateResponse,
@@ -10,7 +9,6 @@ import {
 } from '../types/apiTypes';
 
 // --- Document API ---
-
 /**
  * Загрузка нового файла для обработки.
  * @param file - Объект File для отправки.
@@ -18,7 +16,6 @@ import {
 export const uploadFile = async (file: File): Promise<DocumentCreateResponse> => {
   const formData = new FormData();
   formData.append('file', file);
-
   const response = await apiClient.post<DocumentCreateResponse>('/documents/', formData, {
     headers: {
       'Content-Type': 'multipart/form-data',
@@ -50,15 +47,26 @@ export const getDocumentDetails = async (id: string): Promise<DocumentDetailResp
   return response.data;
 };
 
-
 // --- Summary API ---
-
 /**
  * Запуск фоновой суммаризации документа.
  * @param data - Параметры суммаризации.
  */
 export const createSummary = async (data: SummaryCreateRequest): Promise<SummaryResponse> => {
-  const response = await apiClient.post<SummaryResponse>('/summaries/', data);
+  // Валидация параметров перед отправкой
+  if (data.min_length && data.max_length && data.min_length > data.max_length) {
+    throw new Error('Минимальная длина не может быть больше максимальной');
+  }
+
+  // Приведение параметров к допустимым значениям
+  const validatedData = {
+    ...data,
+    min_length: data.min_length ? Math.max(0, Math.min(1024, data.min_length)) : undefined,
+    max_length: data.max_length ? Math.max(16, Math.min(2048, data.max_length)) : undefined,
+    method: data.method || 'mbart_ru_sum_gazeta'
+  };
+
+  const response = await apiClient.post<SummaryResponse>('/summaries/', validatedData);
   return response.data;
 };
 
@@ -68,5 +76,14 @@ export const createSummary = async (data: SummaryCreateRequest): Promise<Summary
  */
 export const getSummaryStatus = async (id: string): Promise<SummaryResponse> => {
   const response = await apiClient.get<SummaryResponse>(`/summaries/${id}`);
+  return response.data;
+};
+
+/**
+ * Получает последнюю суммаризацию по ID документа.
+ * @param documentId - ID документа.
+ */
+export const getSummaryByDocumentId = async (documentId: string): Promise<SummaryResponse> => {
+  const response = await apiClient.get<SummaryResponse>(`/summaries/by-document/${documentId}`);
   return response.data;
 };

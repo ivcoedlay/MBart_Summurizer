@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:3000": "PORT=3000 vite",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },

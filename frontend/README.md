@@ -12,7 +12,7 @@ AI Document Summarizer — Frontend
 - Отслеживать статус выполнения задачи
 - Просматривать историю обработанных документов
 
-Фронтенд взаимодействует с бэкендом через REST API по адресу `http://localhost:8000/api/v1`.
+Фронтенд взаимодействует с бэкендом через REST API по адресу `http://localhost:8000`.
 
 ---
 
@@ -55,7 +55,7 @@ npm install
 
 ```env
 # .env
-VITE_API_BASE_URL=http://localhost:8000/api/v1
+VITE_API_BASE_URL=http://localhost:8000
 ```
 
 4. Запустите локальный сервер разработки:
@@ -64,7 +64,7 @@ VITE_API_BASE_URL=http://localhost:8000/api/v1
 npm run dev
 ```
 
-Приложение будет доступно по адресу: [http://localhost:5173](http://localhost:5173)
+Приложение будет доступно по адресу: [http://localhost:3000](http://localhost:5173)
 
 5. Для сборки production-версии:
 
@@ -82,4 +82,4 @@ npm run build
 - `POST /summaries/` — запуск суммаризации
 - `GET /summaries/{id}` — статус и результат суммаризации
 
-Бэкенд должен поддерживать CORS для `http://localhost:5173`.
+Бэкенд должен поддерживать CORS для `http://localhost:3000`.

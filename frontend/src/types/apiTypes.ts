@@ -1,17 +1,15 @@
 // frontend/src/types/apiTypes.ts
-
 export type SummaryStatus = 'queued' | 'running' | 'done' | 'failed';
 
 // --- Общие схемы ---
-
 /** Стандартизированный ответ при ошибке от FastAPI */
 export interface ErrorResponse {
   /** Код статуса HTTP, например 404, 422 */
-  status_code: number;
+  status_code?: number;
   /** Краткое описание ошибки */
-  detail: string;
+  detail: string | any[]; // FastAPI может возвращать массив для ошибок валидации
   /** Временная метка ошибки */
-  timestamp: string;
+  timestamp?: string;
   /** Поле для логирования: может содержать трассировку или детали */
   trace_id?: string;
 }
@@ -28,10 +26,10 @@ export interface CustomError extends Error {
     url: string;
     data: any;
   };
+  stack?: string;
 }
 
 // --- Документы (History) ---
-
 export interface DocumentListItem {
   id: string;
   filename: string;
@@ -50,18 +48,15 @@ export interface DocumentListResponse {
 export interface DocumentDetailResponse {
   id: string;
   filename: string;
-  content_type: string;
-  size: number;
-  status: 'processing' | 'completed' | 'failed'; // Важно!
-  created_at: string; // Важно!
+  mime_type: string;
+  size_bytes: number;
+  uploaded_at: string; // ISO 8601
+  parsed: boolean;
   parsed_text?: string;
-  summary?: string; // Важно!
-  error_message?: string;
+  storage_ref?: string;
 }
 
 // --- Суммаризация (Summaries) ---
-
-// frontend/src/types/apiTypes.ts
 export interface SummaryCreateRequest {
   document_id?: string;
   text?: string;
@@ -83,7 +78,6 @@ export interface SummaryResponse {
 }
 
 // --- Загрузка ---
-
 export interface DocumentCreateResponse {
   id: string;
   filename: string;
@@ -91,5 +85,5 @@ export interface DocumentCreateResponse {
   size_bytes: number;
   uploaded_at: string; // ISO 8601
   parsed: boolean;
-  parsed_preview?: string; // ← ДОБАВЬТЕ ЭТУ СТРОКУ
+  parsed_preview?: string;
 }

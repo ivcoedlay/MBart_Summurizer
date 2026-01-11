@@ -1,8 +1,14 @@
 import React, { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { getDocumentDetails } from '../api/apiService';
-import { DocumentDetailResponse } from '../types/apiTypes';
+import {
+    getDocumentDetails,
+    getSummaryByDocumentId,
+} from '../api/apiService';
+import {
+    DocumentDetailResponse,
+    SummaryResponse,
+} from '../types/apiTypes';
 import {
     FileText,
     Clock,
@@ -11,23 +17,41 @@ import {
     Loader2,
     ChevronDown,
     ChevronUp,
-    Download
+    Download,
 } from 'lucide-react';
 
 const DocumentDetailPage: React.FC = () => {
     const { id } = useParams<{ id: string }>();
     const [isTextExpanded, setIsTextExpanded] = useState(false);
 
-    // Исправляем ошибку TS2339, указывая тип <DocumentDetailResponse>
-    const { data, isLoading, isError } = useQuery<DocumentDetailResponse>({
+    // Запрос документа
+    const {
+        data: documentData,          // ← правильно: data → documentData
+        isLoading: isDocLoading,
+        isError: isDocError,
+    } = useQuery<DocumentDetailResponse>({
         queryKey: ['document', id],
         queryFn: () => getDocumentDetails(id!),
         enabled: !!id,
-        refetchInterval: (query) => {
-            // Авто-обновление, если документ еще в процессе обработки
-            return query.state.data?.status === 'processing' ? 3000 : false;
-        }
     });
+
+    // Запрос суммаризации по document_id
+    const {
+        data: summaryData,           // ← правильно: data → summaryData
+        isLoading: isSummaryLoading,
+        isError: isSummaryError,
+    } = useQuery<SummaryResponse>({
+        queryKey: ['summary-by-document', id],
+        queryFn: () => getSummaryByDocumentId(id!),
+        enabled: !!id,
+        refetchInterval: (query) => {
+            const data = query.state.data as SummaryResponse | undefined;
+            return data?.status === 'done' || data?.status === 'failed' ? false : 3000;
+        },
+    });
+
+    const isLoading = isDocLoading;
+    const isError = isDocError;
 
     if (isLoading) {
         return (
@@ -38,17 +62,21 @@ const DocumentDetailPage: React.FC = () => {
         );
     }
 
-    if (isError || !data) {
+    if (isError || !documentData) {
         return (
             <div className="bg-red-50 border border-red-200 rounded-xl p-6 flex items-center text-red-700">
                 <AlertCircle className="w-6 h-6 mr-4" />
                 <div>
                     <h3 className="font-bold">Ошибка загрузки</h3>
-                    <p>Не удалось получить данные документа. Попробуйте позже.</p>
+                    <p>Не удалось получить данные документа.</p>
                 </div>
             </div>
         );
     }
+
+    const summaryStatus = summaryData?.status || 'not_started';
+    const summaryText = summaryData?.summary_text || null;
+    const errorMessage = summaryData?.error_message || null;
 
     return (
         <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in duration-500">
@@ -60,28 +88,36 @@ const DocumentDetailPage: React.FC = () => {
                             <FileText className="w-8 h-8 text-primary-600" />
                         </div>
                         <div>
-                            <h1 className="text-2xl font-bold text-gray-900">{data.filename}</h1>
+                            <h1 className="text-2xl font-bold text-gray-900">{documentData.filename}</h1>
                             <div className="flex items-center text-sm text-gray-500 mt-1">
                                 <Clock className="w-4 h-4 mr-1" />
-                                {new Date(data.created_at).toLocaleString('ru-RU')}
+                                {new Date(documentData.uploaded_at).toLocaleString('ru-RU')}
                             </div>
                         </div>
                     </div>
-
                     <div className="flex items-center space-x-3">
-                        {/* Статус теперь типизирован корректно */}
-                        <div className={`flex items-center px-4 py-2 rounded-full text-sm font-medium
-              ${data.status === 'completed' ? 'bg-green-100 text-green-700' :
-                            data.status === 'processing' ? 'bg-amber-100 text-amber-700' :
-                                'bg-red-100 text-red-700'}`}
+                        <div
+                            className={`flex items-center px-4 py-2 rounded-full text-sm font-medium ${
+                                summaryStatus === 'done'
+                                    ? 'bg-green-100 text-green-700'
+                                    : summaryStatus === 'running'
+                                        ? 'bg-amber-100 text-amber-700 animate-pulse'
+                                        : summaryStatus === 'failed'
+                                            ? 'bg-red-100 text-red-700'
+                                            : 'bg-gray-100 text-gray-700'
+                            }`}
                         >
-                            {data.status === 'completed' && <CheckCircle2 className="w-4 h-4 mr-2" />}
-                            {data.status === 'processing' && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                            {data.status === 'failed' && <AlertCircle className="w-4 h-4 mr-2" />}
-                            {data.status === 'completed' ? 'Готово' :
-                                data.status === 'processing' ? 'В обработке' : 'Ошибка'}
+                            {summaryStatus === 'done' && <CheckCircle2 className="w-4 h-4 mr-2" />}
+                            {summaryStatus === 'running' && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                            {summaryStatus === 'failed' && <AlertCircle className="w-4 h-4 mr-2" />}
+                            {summaryStatus === 'done'
+                                ? 'Готово'
+                                : summaryStatus === 'running'
+                                    ? 'В обработке'
+                                    : summaryStatus === 'failed'
+                                        ? 'Ошибка'
+                                        : 'Не запущено'}
                         </div>
-
                         <button className="p-2 text-gray-400 hover:text-primary-600 transition-colors">
                             <Download className="w-6 h-6" />
                         </button>
@@ -97,17 +133,24 @@ const DocumentDetailPage: React.FC = () => {
                             <h2 className="text-lg font-semibold text-gray-900">Результат суммаризации</h2>
                         </div>
                         <div className="p-6">
-                            {data.summary ? (
+                            {summaryText ? (
                                 <p className="text-gray-700 leading-relaxed text-lg italic">
-                                    «{data.summary}»
+                                    «{summaryText}»
                                 </p>
-                            ) : data.status === 'processing' ? (
+                            ) : summaryStatus === 'running' || summaryStatus === 'queued' ? (
                                 <div className="text-center py-10">
                                     <Loader2 className="w-8 h-8 animate-spin text-primary-400 mx-auto mb-3" />
-                                    <p className="text-gray-500 text-sm">Нейросеть анализирует текст...</p>
+                                    <p className="text-gray-500 text-sm">
+                                        {summaryStatus === 'queued' ? 'В очереди...' : 'Нейросеть анализирует текст...'}
+                                    </p>
+                                </div>
+                            ) : summaryStatus === 'failed' ? (
+                                <div className="text-red-600">
+                                    <AlertCircle className="inline w-5 h-5 mr-1" />
+                                    Ошибка: {errorMessage || 'Неизвестная ошибка'}
                                 </div>
                             ) : (
-                                <p className="text-gray-400 italic">Суммаризация еще не выполнена.</p>
+                                <p className="text-gray-400 italic">Суммаризация ещё не запущена.</p>
                             )}
                         </div>
                     </div>
@@ -121,11 +164,10 @@ const DocumentDetailPage: React.FC = () => {
                             <h2 className="text-lg font-semibold text-gray-900">Полный текст документа</h2>
                             {isTextExpanded ? <ChevronUp /> : <ChevronDown />}
                         </button>
-
                         {isTextExpanded && (
                             <div className="p-6 pt-0 border-t border-gray-50 animate-in slide-in-from-top-2 duration-300">
                                 <div className="bg-gray-50 rounded-xl p-4 text-gray-600 text-sm leading-relaxed whitespace-pre-wrap max-h-[500px] overflow-y-auto">
-                                    {data.parsed_text || "Текст не был извлечен."}
+                                    {documentData.parsed_text || 'Текст не был извлечен.'}
                                 </div>
                             </div>
                         )}
@@ -138,8 +180,8 @@ const DocumentDetailPage: React.FC = () => {
                         <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Метаданные</h3>
                         <div className="space-y-4 text-sm">
                             <div className="flex justify-between">
-                                <span className="text-gray-500">ID проекта:</span>
-                                <span className="font-mono text-xs text-gray-900">{data.id.substring(0, 8)}...</span>
+                                <span className="text-gray-500">ID документа:</span>
+                                <span className="font-mono text-xs text-gray-900">{documentData.id.substring(0, 8)}...</span>
                             </div>
                             <div className="flex justify-between">
                                 <span className="text-gray-500">Язык:</span>
@@ -147,7 +189,7 @@ const DocumentDetailPage: React.FC = () => {
                             </div>
                             <div className="flex justify-between">
                                 <span className="text-gray-500">Длина текста:</span>
-                                <span className="text-gray-900">{data.parsed_text?.length || 0} симв.</span>
+                                <span className="text-gray-900">{documentData.parsed_text?.length || 0} симв.</span>
                             </div>
                         </div>
                     </div>
